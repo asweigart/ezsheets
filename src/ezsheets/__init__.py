@@ -14,6 +14,21 @@ __version__ = '0.0.1'
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE = None
 
+"""
+Features to add:
+
+- get values from cells
+- modify values in cells
+- change title of spreadsheet and sheets
+- download as csv/excel/whatever
+
+Done:
+- get sheet names
+"""
+
+
+# Sample spreadsheet id: 16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c
+
 
 class EZSheetsException(Exception):
     pass # This class exists for this module to raise for EZSheets-specific problems.
@@ -21,9 +36,9 @@ class EZSheetsException(Exception):
 
 class Spreadsheet():
     def __init__(self, spreadsheetId):
-        self.spreadsheetId = spreadsheetId
+        self._spreadsheetId = getIdFromUrl(spreadsheetId)
 
-        request = SERVICE.spreadsheets().get(spreadsheetId=self.spreadsheetId)
+        request = SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId)
         response = request.execute()
 
         """
@@ -80,8 +95,16 @@ class Spreadsheet():
                               'hideGridlines':           gp.get('hideGridlines'),
                               'rowGroupControlAfter':    gp.get('rowGroupControlAfter'),
                               'columnGroupControlAfter': gp.get('columnGroupControlAfter'),}
-            sheet = Sheet(title, sheetId, **additionalArgs)
+            sheet = Sheet(self._spreadsheetId, title, sheetId, **additionalArgs)
             self.sheets.append(sheet)
+
+    @property
+    def spreadsheetId(self):
+        return self._spreadsheetId
+
+    @property
+    def sheetTitles(self):
+        return tuple([sheet.title for sheet in self.sheets])
 
     def __str__(self):
         return '<%s title="%d", %s sheets>' % (type(self).__name__, self.title, len(self.sheets))
@@ -107,7 +130,7 @@ class Sheet():
 
     # Set up the read-only attributes.
     @property
-    def _spreadsheetId(self):
+    def spreadsheetId(self):
         return self._spreadsheetId
     @property
     def title(self):
@@ -161,12 +184,104 @@ class Sheet():
 
 
     def get(self, column, row):
-        if not self._dataLoaded:
-            response = SERVICE.spreadsheets().values().get(spreadsheetId='', range='%s!%s:%s').execute()
-            self._data = response['values']
-            self._majorDimension = response['majorDimension']
-            # LEFT OFF
+        if not isinstance(column, int):
+            raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
+        if not isinstance(row, int):
+            raise TypeError('row indices must be integers, not %s' % (type(row).__name__))
+        if column < 1 or row < 1:
+            raise IndexError('Column %s, row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index. Negative indices are not supported by ezsheets.' % (column, row))
 
+
+        if not self._dataLoaded:
+            self.refresh()
+        try:
+            if self._majorDimension == 'ROWS':
+                return self._cells[row-1][column-1] # -1 because _cells is 0-based while Google Sheets is 1-based.
+            elif self._majorDimension == 'COLUMNS':
+                return self._cells[column-1][row-1]
+        except IndexError:
+            return ''
+
+    def getRow(self, row):
+        if not isinstance(row, int):
+            raise TypeError('row indices must be integers, not %s' % (type(row).__name__))
+        if row < 1:
+            raise IndexError('Row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (row))
+
+        if not self._dataLoaded:
+            self.refresh()
+
+        if self._majorDimension == 'ROWS':
+            try:
+                return self._cells[row-1] # -1 because _cells is 0-based while Google Sheets is 1-based.
+            except IndexError:
+                return []
+        elif self._majorDimension == 'COLUMNS':
+            rowList = []
+            for row in range(len(self._cells)):
+                if (len(self._cells[row]) == 0) or (row-1 >= len(self._cells[row])):
+                    rowList.append('')
+                else:
+                    rowList.append(self._cells[row][row-1]) # rows don't have -1 because they're based on _cells which is a 0-based Python lists.
+            return rowList
+
+
+    def getColumn(self, column):
+        if not isinstance(column, int):
+            raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
+        if column < 1:
+            raise IndexError('Column %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (column))
+
+        if not self._dataLoaded:
+            self.refresh()
+
+        if self._majorDimension == 'COLUMNS':
+            try:
+                return self._cells[column-1] # -1 because _cells is 0-based while Google Sheets is 1-based.
+            except IndexError:
+                return []
+        elif self._majorDimension == 'ROWS':
+            columnList = []
+            for row in range(len(self._cells)):
+                if (len(self._cells[row]) == 0) or (column-1 >= len(self._cells[row])):
+                    columnList.append('')
+                else:
+                    columnList.append(self._cells[row][column-1]) # columns don't have -1 because they're based on _cells which is a 0-based Python lists.
+            return columnList
+
+
+    def refresh(self):
+        request = SERVICE.spreadsheets().values().get(
+            spreadsheetId=self._spreadsheetId,
+            range='%s!A1:%s%s' % (self._title, getColumnLetter(self._columnCount), self._rowCount))
+        response = request.execute()
+
+        self._cells = response['values']
+        self._majorDimension = response['majorDimension']
+
+        self._dataLoaded = True
+
+
+    def downloadAsCSV(self):
+        pass # TODO
+    def downloadAsExcel(self):
+        pass # TODO
+    def downloadAsODS(self):
+        pass # TODO
+    def downloadAsPDF(self):
+        pass # TODO
+    def downloadAsHTML(self):
+        pass # TODO
+    def downloadAsTSV(self):
+        pass # TODO
+
+
+def getIdFromUrl(url):
+    # https://docs.google.com/spreadsheets/d/16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c/edit#gid=0
+    if url.startswith('https://docs.google.com/spreadsheets/d/'):
+        return url[39:url.find('/', 39)]
+    else:
+        return url
 
 def getColumnLetter(columnNumber):
     """getColumnLetter(1) => 'A', getColumnLetter(27) => 'AA'"""
