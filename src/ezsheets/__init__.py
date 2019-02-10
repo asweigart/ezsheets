@@ -1,12 +1,20 @@
 # EZSheets
 # By Al Sweigart al@inventwithpython.com
 
-import pickle
+import pickle, copy
 import os.path
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 import googleapiclient
+
+try:
+    # For Python 3:
+    from collections.abc import Iterable
+except:
+    # For Python 2:
+    from collections import Iterable
+
 
 __version__ = '0.0.1'
 
@@ -37,7 +45,9 @@ class EZSheetsException(Exception):
 class Spreadsheet():
     def __init__(self, spreadsheetId):
         self._spreadsheetId = getIdFromUrl(spreadsheetId)
+        self.refresh()
 
+    def refresh(self):
         request = SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId)
         response = request.execute()
 
@@ -125,7 +135,7 @@ class Sheet():
         self._rowGroupControlAfter    = kwargs.get('rowGroupControlAfter')
         self._columnGroupControlAfter = kwargs.get('columnGroupControlAfter')
 
-        self._dataLoaded = False
+        self._dataIsFresh = False
         self._data = None
 
     # Set up the read-only attributes.
@@ -191,9 +201,9 @@ class Sheet():
         if column < 1 or row < 1:
             raise IndexError('Column %s, row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index. Negative indices are not supported by ezsheets.' % (column, row))
 
-
-        if not self._dataLoaded:
+        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
             self.refresh()
+
         try:
             if self._majorDimension == 'ROWS':
                 return self._cells[row-1][column-1] # -1 because _cells is 0-based while Google Sheets is 1-based.
@@ -202,13 +212,39 @@ class Sheet():
         except IndexError:
             return ''
 
+
+    def getAll(self):
+        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
+            self.refresh()
+
+        if self._majorDimension == 'ROWS':
+            return copy.deepcopy(self._cells)
+        elif self._majorDimension == 'COLUMNS':
+            # self._cells' inner lists represent columns, not rows. But getAll() should always return a ROWS-major dimensioned structure.
+            cells = []
+
+            longestColumnLength = max([len(column) for column in self._cells])
+            for rowIndex in range(longestColumnLength):
+                rowList = []
+                for columnData in self._cells:
+                    if rowIndex < len(columnData):
+                        rowList.append(columnData[rowIndex])
+                    else:
+                        rowList.append('')
+                cells.append(rowList)
+
+            return cells
+        else:
+            assert False, 'self._majorDimension is set to %s instead of "ROWS" or "COLUMNS"' % (self._majorDimension)
+
+
     def getRow(self, row):
         if not isinstance(row, int):
             raise TypeError('row indices must be integers, not %s' % (type(row).__name__))
         if row < 1:
             raise IndexError('Row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (row))
 
-        if not self._dataLoaded:
+        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
             self.refresh()
 
         if self._majorDimension == 'ROWS':
@@ -232,7 +268,7 @@ class Sheet():
         if column < 1:
             raise IndexError('Column %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (column))
 
-        if not self._dataLoaded:
+        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
             self.refresh()
 
         if self._majorDimension == 'COLUMNS':
@@ -253,13 +289,99 @@ class Sheet():
     def refresh(self):
         request = SERVICE.spreadsheets().values().get(
             spreadsheetId=self._spreadsheetId,
-            range='%s!A1:%s%s' % (self._title, getColumnLetter(self._columnCount), self._rowCount))
+            range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount))
         response = request.execute()
 
         self._cells = response['values']
         self._majorDimension = response['majorDimension']
 
-        self._dataLoaded = True
+        self._dataIsFresh = True
+
+
+    def update(self, row, column, value):
+        if not isinstance(column, int):
+            raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
+        if not isinstance(row, int):
+            raise TypeError('row indices must be integers, not %s' % (type(row).__name__))
+        if column < 1 or row < 1:
+            raise IndexError('Column %s, row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index. Negative indices are not supported by ezsheets.' % (column, row))
+
+        cellLocation = getColumnLetterOf(column) + str(row)
+        request = SERVICE.spreadsheets().values().update(
+            spreadsheetId=self._spreadsheetId,
+            range='%s!%s:%s' % (self._title, cellLocation, cellLocation),
+            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+            body={
+                'majorDimension': 'ROWS',
+                'values': [[value]],
+                'range': '%s!%s:%s' % (self._title, cellLocation, cellLocation),
+                }
+            )
+        response = request.execute()
+        print(response)
+
+        self._dataIsFresh = False
+
+
+
+    def updateRow(self, row, values):
+        if not isinstance(row, int):
+            raise TypeError('row indices must be integers, not %s' % (type(row).__name__))
+        if row < 1:
+            raise IndexError('Row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (row))
+        if not isinstance(values, Iterable):
+            raise TypeError('values must be an iterable, not %s' % (type(values).__name__))
+
+        request = SERVICE.spreadsheets().values().update(
+            spreadsheetId=self._spreadsheetId,
+            range='%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
+            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+            body={
+                'majorDimension': 'ROWS',
+                'values': [values],
+                'range': '%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
+                }
+            )
+        response = request.execute()
+        print(response)
+
+        self._dataIsFresh = False
+
+    def updateColumn(self, column, values):
+        if not isinstance(column, int):
+            raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
+        if column < 1:
+            raise IndexError('Column %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (column))
+        if not isinstance(values, Iterable):
+            raise TypeError('values must be an iterable, not %s' % (type(values).__name__))
+
+        # LEFT OFF - i need to copy this logic to updateRow.
+        if len(values) < self._rowCount:
+            values.extend([''] * (self._rowCount - len(values)))
+
+        request = SERVICE.spreadsheets().values().update(
+            spreadsheetId=self._spreadsheetId,
+            range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), max(len(values), self._rowCount)),
+            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+            body={
+                'majorDimension': 'COLUMNS',
+                'values': [values],
+                'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), max(len(values), self._rowCount)),
+                }
+            )
+        response = request.execute()
+        print(response)
+
+        self._dataIsFresh = False
+
+    def updateAll(self, values):
+        # Ensure that `values` is a list of lists:
+
+
+        # Find out the dimensions of `values`
+        valRowCount = len(values)
+        valColumnCount = max([len(row) for row in values])
+        # LEFT OFF
 
 
     def downloadAsCSV(self):
@@ -283,8 +405,8 @@ def getIdFromUrl(url):
     else:
         return url
 
-def getColumnLetter(columnNumber):
-    """getColumnLetter(1) => 'A', getColumnLetter(27) => 'AA'"""
+def getColumnLetterOf(columnNumber):
+    """getColumnLetterOf(1) => 'A', getColumnLetterOf(27) => 'AA'"""
     letters = []
     while columnNumber > 0:
         columnNumber, remainder = divmod(columnNumber, 26)
@@ -345,3 +467,4 @@ def init(tokenFile='token.pickle', credentialsFile='credentials.json'):
     SERVICE = build('sheets', 'v4', credentials=creds)
 
 init()
+s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
