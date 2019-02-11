@@ -367,10 +367,15 @@ class Sheet():
 
 
     def getColumn(self, column):
-        if not isinstance(column, int):
-            raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
-        if column < 1:
+        if not isinstance(column, (int, str)):
+            raise TypeError('column indices must be integers or str, not %s' % (type(column).__name__))
+        if isinstance(column, int) and column < 1:
             raise IndexError('Column %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (column))
+        if isinstance(column, str) and not column.isalpha():
+            raise ValueError('Column %s does not exist. Columns must be a 1-based int or a letters-only str.')
+
+        if isinstance(column, str):
+            column = getColumnNumber(column)
 
         if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
             self.refresh()
@@ -453,12 +458,17 @@ class Sheet():
 
 
     def updateColumn(self, column, values):
-        if not isinstance(column, int):
+        if not isinstance(column, (int, str)):
             raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
-        if column < 1:
+        if isinstance(column, int) and column < 1:
             raise IndexError('Column %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (column))
         if not isinstance(values, Iterable):
             raise TypeError('values must be an iterable, not %s' % (type(values).__name__))
+        if isinstance(column, str) and not column.isalpha():
+            raise ValueError('Column %s does not exist. Columns must be a 1-based int or a letters-only str.')
+
+        if isinstance(column, str):
+            column = getColumnNumber(column)
 
         if len(values) < self._rowCount:
             values.extend([''] * (self._rowCount - len(values)))
