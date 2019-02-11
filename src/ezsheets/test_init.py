@@ -7,7 +7,7 @@ class test_getIdFromUrl(unittest.TestCase):
 
 	# Tests should change when behavior for bad urls passed in is decided.
 	# If bad urls are allowed the 404 should be caught in refresh(),
-	# Else more filtering should be done to URL input.
+	# Else more handling should be done to URL input.
 
 	# Standard use case
 	def test_IdFromUrl(self):
@@ -54,16 +54,24 @@ class test_getColumnLetterOf(unittest.TestCase):
 		
 class test_getColumnNumber(unittest.TestCase):
 	
+	# Test from documentation in the code.
 	def test_ColumnNumber(self):
 		self.assertEqual(init.getColumnNumber('A'), 1)
 		
+	# Test from documentation in the code.
 	def test_ColumnNumber1(self):
+		self.assertEqual(init.getColumnNumber('AA'), 27)
+		
+	# Test when column doesn't exist.
+	def test_ColumnNumber2(self):
 		self.assertEqual(init.getColumnNumber(''), 0)
 		
-	def test_ColumnNumber2(self):
+	# Test for accuracy when dealing with large number of columns.
+	def test_ColumnNumber3(self):
 		self.assertEqual(init.getColumnNumber('ZZ'), 702)
 		
-	def test_ColumnNumber3(self):
+	# If a number is given as input, the number should probably be returned.
+	def test_ColumnNumber4(self):
 		self.assertEqual(init.getColumnNumber(1), 1)
 	
 if __name__ == '__main__':
