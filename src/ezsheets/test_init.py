@@ -75,8 +75,6 @@ class test_getColumnNumber(unittest.TestCase):
 		self.assertEqual(init.getColumnNumber(1), 1)
 	
 if __name__ == '__main__':
-	#init.Spreadsheet(r"https://docs.google.com/spreadsheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0")
-	# print(init.getColumnLetterOf('A'))
 	unittest.main()
 	
 	
