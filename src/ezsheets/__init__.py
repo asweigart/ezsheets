@@ -94,19 +94,21 @@ class Spreadsheet():
         self._title = response['properties']['title']
 
         self.sheets = []
-        for sheetInfo in response['sheets']:
+        for i, sheetInfo in enumerate(response['sheets']):
             title = sheetInfo['properties']['title']
             sheetId = sheetInfo['properties']['sheetId']
             gp = sheetInfo['properties']['gridProperties'] # syntactic sugar
-            additionalArgs = {'rowCount':                gp.get('rowCount'),
+            additionalArgs = {'index':                   i,
+                              'rowCount':                gp.get('rowCount'),
                               'columnCount':             gp.get('columnCount'),
                               'frozenRowCount':          gp.get('frozenRowCount'),
                               'frozenColumnCount':       gp.get('frozenColumnCount'),
                               'hideGridlines':           gp.get('hideGridlines'),
                               'rowGroupControlAfter':    gp.get('rowGroupControlAfter'),
                               'columnGroupControlAfter': gp.get('columnGroupControlAfter'),}
-            sheet = Sheet(self._spreadsheetId, title, sheetId, **additionalArgs)
+            sheet = Sheet(self, title, sheetId, **additionalArgs)
             self.sheets.append(sheet)
+        self.sheets = tuple(self.sheets) # Make sheets attribute an immutable tuple.
 
     @property
     def spreadsheetId(self):
@@ -128,6 +130,7 @@ class Spreadsheet():
 
     @title.setter
     def title(self, value):
+        value = str(value)
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
         body={
             'requests': [{'updateSpreadsheetProperties': {'properties': {'title': value},
@@ -141,10 +144,11 @@ class Spreadsheet():
 
 
 class Sheet():
-    def __init__(self, spreadsheetId, title, sheetId, **kwargs):
-        self._spreadsheetId = spreadsheetId
+    def __init__(self, spreadsheet, title, sheetId, **kwargs):
+        self._spreadsheet = spreadsheet
         self._title = title
         self._sheetId = sheetId
+        self._index                   = kwargs.get('index')
         self._rowCount                = kwargs.get('rowCount')
         self._columnCount             = kwargs.get('columnCount')
         self._frozenRowCount          = kwargs.get('frozenRowCount')
@@ -158,15 +162,17 @@ class Sheet():
 
     # Set up the read-only attributes.
     @property
-    def spreadsheetId(self):
-        return self._spreadsheetId
+    def spreadsheet(self):
+        return self._spreadsheet
+
     @property
     def title(self):
         return self._title
 
     @title.setter
     def title(self, value):
-        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
+        value = str(value)
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'title': value},
@@ -177,6 +183,28 @@ class Sheet():
         })
         request.execute()
         s._title = value
+
+    @property
+    def index(self):
+        return self._index
+
+
+    @index.setter
+    def index(self, value):
+        if not isinstance(value, int):
+            raise TypeError('indices must be integers, not %s' % (type(value).__name__))
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        body={
+            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+                                                                   'index': value},
+                                                    'fields': 'index'}}],
+            'includeSpreadsheetInResponse': False,
+            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
+            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
+        })
+        request.execute()
+        self._spreadsheet.refresh() # Update the spreadsheet's tuple of Sheet objects to reflect the new order.
+
 
     @property
     def sheetId(self):
@@ -321,7 +349,7 @@ class Sheet():
 
     def refresh(self):
         request = SERVICE.spreadsheets().values().get(
-            spreadsheetId=self._spreadsheetId,
+            spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount))
         response = request.execute()
 
@@ -341,7 +369,7 @@ class Sheet():
 
         cellLocation = getColumnLetterOf(column) + str(row)
         request = SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheetId,
+            spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!%s:%s' % (self._title, cellLocation, cellLocation),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
             body={
@@ -350,8 +378,7 @@ class Sheet():
                 'range': '%s!%s:%s' % (self._title, cellLocation, cellLocation),
                 }
             )
-        response = request.execute()
-        print(response)
+        request.execute()
 
         self._dataIsFresh = False
 
@@ -368,7 +395,7 @@ class Sheet():
             values.extend([''] * (self._columnCount - len(values)))
 
         request = SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheetId,
+            spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
             body={
@@ -377,8 +404,7 @@ class Sheet():
                 'range': '%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
                 }
             )
-        response = request.execute()
-        print(response)
+        request.execute()
 
         self._dataIsFresh = False
 
@@ -395,7 +421,7 @@ class Sheet():
             values.extend([''] * (self._rowCount - len(values)))
 
         request = SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheetId,
+            spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
             body={
@@ -530,4 +556,4 @@ def init(tokenFile='token.pickle', credentialsFile='credentials.json'):
     SERVICE = build('sheets', 'v4', credentials=creds)
 
 init()
-s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
+#s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
