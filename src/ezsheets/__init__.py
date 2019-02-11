@@ -22,6 +22,8 @@ __version__ = '0.0.1'
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE = None
 
+from ezsheets.colorvalues import COLORS
+
 """
 Features to add:
 
@@ -182,7 +184,48 @@ class Sheet():
             'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
         })
         request.execute()
-        s._title = value
+        self._title = value
+
+    @property
+    def tabColor(self):
+        return self._tabColor
+
+    @tabColor.setter
+    def tabColor(self, value):
+
+        if isinstance(value, str):
+            tabColorArg = {
+                'red': COLORS[value][0],
+                'green': COLORS[value][1],
+                'blue': COLORS[value][2],
+                'alpha': COLORS[value][3],
+            }
+
+        #elif value is None: # TODO - apparently there's no way to reset the color through the api?
+        #    tabColorArg = {} # Reset the color
+        else:
+            tabColorArg = {
+                'red': float(value[0]),
+                'green': float(value[1]),
+                'blue': float(value[2]),
+            }
+            try:
+                tabColorArg['alpha'] = value[3]
+            except:
+                tabColorArg['alpha'] = 1.0
+
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
+        body={
+            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+                                                                   'tabColor': tabColorArg},
+                                                    'fields': 'tabColor'}}],
+            'includeSpreadsheetInResponse': False,
+            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
+            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
+        })
+        request.execute()
+        self._tabColor = value
+
 
     @property
     def index(self):
@@ -524,10 +567,6 @@ def getColumnNumber(columnLetter):
 
 
 
-
-
-
-
 def init(tokenFile='token.pickle', credentialsFile='credentials.json'):
     global SERVICE
 
@@ -555,5 +594,8 @@ def init(tokenFile='token.pickle', credentialsFile='credentials.json'):
 
     SERVICE = build('sheets', 'v4', credentials=creds)
 
+
+
+
 init()
-#s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
+s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
