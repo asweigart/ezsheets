@@ -91,7 +91,7 @@ class Spreadsheet():
          """
         #self.locale = response['properties']['locale'] # Leave these commented until it's clear I actually need them.
         #self.timeZone = response['properties']['timeZone']
-        self.title = response['properties']['title']
+        self._title = response['properties']['title']
 
         self.sheets = []
         for sheetInfo in response['sheets']:
@@ -122,6 +122,24 @@ class Spreadsheet():
     def __repr__(self):
         return '%s(spreadsheetId=%s)' % (type(self).__name__, self.spreadsheetId)
 
+    @property
+    def title(self):
+        return self._title
+
+    @title.setter
+    def title(self, value):
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
+        body={
+            'requests': [{'updateSpreadsheetProperties': {'properties': {'title': value},
+                                                          'fields': 'title'}}],
+            'includeSpreadsheetInResponse': False,
+            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
+            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
+        })
+        request.execute()
+        s._title = value
+
+
 class Sheet():
     def __init__(self, spreadsheetId, title, sheetId, **kwargs):
         self._spreadsheetId = spreadsheetId
@@ -145,6 +163,21 @@ class Sheet():
     @property
     def title(self):
         return self._title
+
+    @title.setter
+    def title(self, value):
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
+        body={
+            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+                                                                   'title': value},
+                                                    'fields': 'title'}}],
+            'includeSpreadsheetInResponse': False,
+            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
+            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
+        })
+        request.execute()
+        s._title = value
+
     @property
     def sheetId(self):
         return self._sheetId
@@ -323,7 +356,6 @@ class Sheet():
         self._dataIsFresh = False
 
 
-
     def updateRow(self, row, values):
         if not isinstance(row, int):
             raise TypeError('row indices must be integers, not %s' % (type(row).__name__))
@@ -331,6 +363,9 @@ class Sheet():
             raise IndexError('Row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (row))
         if not isinstance(values, Iterable):
             raise TypeError('values must be an iterable, not %s' % (type(values).__name__))
+
+        if len(values) < self._columnCount:
+            values.extend([''] * (self._columnCount - len(values)))
 
         request = SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheetId,
@@ -347,6 +382,7 @@ class Sheet():
 
         self._dataIsFresh = False
 
+
     def updateColumn(self, column, values):
         if not isinstance(column, int):
             raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
@@ -355,18 +391,17 @@ class Sheet():
         if not isinstance(values, Iterable):
             raise TypeError('values must be an iterable, not %s' % (type(values).__name__))
 
-        # LEFT OFF - i need to copy this logic to updateRow.
         if len(values) < self._rowCount:
             values.extend([''] * (self._rowCount - len(values)))
 
         request = SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheetId,
-            range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), max(len(values), self._rowCount)),
+            range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
             body={
                 'majorDimension': 'COLUMNS',
                 'values': [values],
-                'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), max(len(values), self._rowCount)),
+                'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
                 }
             )
         response = request.execute()
@@ -380,8 +415,36 @@ class Sheet():
 
         # Find out the dimensions of `values`
         valRowCount = len(values)
-        valColumnCount = max([len(row) for row in values])
+        #valColumnCount = max([len(row) for row in values])
         # LEFT OFF
+
+        if valRowCount < self._rowCount:
+            values.extend([''] * (self._rowCount - valRowCount))
+
+        for row in values:
+            row.extend([''] * (self.__columnCount - len(row)))
+
+
+
+        if self._majorDimension == 'ROWS':
+            return copy.deepcopy(self._cells)
+        elif self._majorDimension == 'COLUMNS':
+            # self._cells' inner lists represent columns, not rows. But getAll() should always return a ROWS-major dimensioned structure.
+            cells = []
+
+            longestColumnLength = max([len(column) for column in self._cells])
+            for rowIndex in range(longestColumnLength):
+                rowList = []
+                for columnData in self._cells:
+                    if rowIndex < len(columnData):
+                        rowList.append(columnData[rowIndex])
+                    else:
+                        rowList.append('')
+                cells.append(rowList)
+
+            return cells
+        else:
+            assert False, 'self._majorDimension is set to %s instead of "ROWS" or "COLUMNS"' % (self._majorDimension)
 
 
     def downloadAsCSV(self):
