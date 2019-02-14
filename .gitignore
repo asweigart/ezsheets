@@ -95,3 +95,8 @@ target/
 # Cookiecutter
 output/
 python_boilerplate/
+
+
+
+credentials.json
+token.pickle
