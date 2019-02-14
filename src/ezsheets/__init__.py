@@ -6,34 +6,20 @@ import os.path
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-import googleapiclient
-
-try:
-    # For Python 3:
-    from collections.abc import Iterable
-except:
-    # For Python 2:
-    from collections import Iterable
-
 
 __version__ = '0.0.1'
 
 #SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE = None
+IS_INITIALIZED = False
 
 from ezsheets.colorvalues import COLORS
 
 """
 Features to add:
-
-- get values from cells
-- modify values in cells
-- change title of spreadsheet and sheets
+- delete spreadsheets
 - download as csv/excel/whatever
-
-Done:
-- get sheet names
 """
 
 
@@ -46,6 +32,10 @@ class EZSheetsException(Exception):
 
 class Spreadsheet():
     def __init__(self, spreadsheetId):
+        if not IS_INITIALIZED: init() # Initialize this module if not done so already.
+
+        self._dataIsFresh = False
+
         self._spreadsheetId = getIdFromUrl(spreadsheetId)
         self.refresh()
 
@@ -97,10 +87,10 @@ class Spreadsheet():
 
         self.sheets = []
         for i, sheetInfo in enumerate(response['sheets']):
-            title = sheetInfo['properties']['title']
             sheetId = sheetInfo['properties']['sheetId']
             gp = sheetInfo['properties']['gridProperties'] # syntactic sugar
-            additionalArgs = {'index':                   i,
+            additionalArgs = {'title':                   sheetInfo['properties']['title'],
+                              'index':                   i,
                               'rowCount':                gp.get('rowCount'),
                               'columnCount':             gp.get('columnCount'),
                               'frozenRowCount':          gp.get('frozenRowCount'),
@@ -108,9 +98,10 @@ class Spreadsheet():
                               'hideGridlines':           gp.get('hideGridlines'),
                               'rowGroupControlAfter':    gp.get('rowGroupControlAfter'),
                               'columnGroupControlAfter': gp.get('columnGroupControlAfter'),}
-            sheet = Sheet(self, title, sheetId, **additionalArgs)
+            sheet = Sheet(self, sheetId, **additionalArgs)
             self.sheets.append(sheet)
         self.sheets = tuple(self.sheets) # Make sheets attribute an immutable tuple.
+        self._dataIsFresh = True
 
     @property
     def spreadsheetId(self):
@@ -145,11 +136,41 @@ class Spreadsheet():
         s._title = value
 
 
+    def addSheet(self, title='', rowCount=100, columnCount=12, index=None, tabColor=None):
+        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
+            self.refresh()
+
+        if index is None:
+            # Set the index to make this new sheet be the last sheet:
+            index = len(self.sheets)
+
+        propertiesDictValue = {'title': title,
+                               'index': index,
+                               'gridProperties' : {'rowCount': rowCount,
+                                                   'columnCount': columnCount}}
+        if tabColor is not None:
+            propertiesDictValue['tabColor'] = _getTabColorArg(tabColor)
+
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
+        body={
+            'requests': [{'addSheet': {'properties': propertiesDictValue}}],
+            'includeSpreadsheetInResponse': False,
+            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
+            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
+        })
+        request.execute()
+
+        self._dataIsFresh = False
+
+
+
 class Sheet():
-    def __init__(self, spreadsheet, title, sheetId, **kwargs):
+    def __init__(self, spreadsheet, sheetId, **kwargs):
+        if not IS_INITIALIZED: init() # Initialize this module if not done so already.
+
         self._spreadsheet = spreadsheet
-        self._title = title
         self._sheetId = sheetId
+        self._title                   = kwargs.get('title')
         self._index                   = kwargs.get('index')
         self._rowCount                = kwargs.get('rowCount')
         self._columnCount             = kwargs.get('columnCount')
@@ -186,33 +207,14 @@ class Sheet():
         request.execute()
         self._title = value
 
+
     @property
     def tabColor(self):
         return self._tabColor
 
     @tabColor.setter
     def tabColor(self, value):
-
-        if isinstance(value, str):
-            tabColorArg = {
-                'red': COLORS[value][0],
-                'green': COLORS[value][1],
-                'blue': COLORS[value][2],
-                'alpha': COLORS[value][3],
-            }
-
-        #elif value is None: # TODO - apparently there's no way to reset the color through the api?
-        #    tabColorArg = {} # Reset the color
-        else:
-            tabColorArg = {
-                'red': float(value[0]),
-                'green': float(value[1]),
-                'blue': float(value[2]),
-            }
-            try:
-                tabColorArg['alpha'] = value[3]
-            except:
-                tabColorArg['alpha'] = 1.0
+        tabColorArg = self._getTabColorArg(value)
 
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
         body={
@@ -236,6 +238,14 @@ class Sheet():
     def index(self, value):
         if not isinstance(value, int):
             raise TypeError('indices must be integers, not %s' % (type(value).__name__))
+        if value < 0:
+            raise ValueError('indices are 0-based, and must be 0 or greater, not %r' % (value))
+
+        if value == self.index:
+            return # No change needed.
+        if value > self.index:
+            value += 1 # Google Sheets uses "before the move" indexes, which is confusing and I don't want to do it here.
+
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
@@ -297,7 +307,15 @@ class Sheet():
         return '%s(%s)' % (type(self).__name__, ', '.join(args))
 
 
-    def get(self, column, row):
+    def get(self, *args):
+        if len(args) == 2: # args are column, row like (2, 5)
+            column, row = args
+        elif len(args) == 1: # args is a string of a grid cell like ('B5',)
+            column, row = convertToColumnRowInts(args[0])
+        else:
+            raise TypeError("get() takes one or two arguments, like ('A1',) or (2, 5)")
+
+
         if not isinstance(column, int):
             raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
         if not isinstance(row, int):
@@ -407,7 +425,15 @@ class Sheet():
         self._dataIsFresh = True
 
 
-    def update(self, row, column, value):
+    def update(self, *args):
+        if len(args) == 3: # args are column, row like (2, 5)
+            column, row, value = args
+        elif len(args) == 2: # args is a string of a grid cell like ('B5',)
+            column, row = convertToColumnRowInts(args[0])
+            value = args[1]
+        else:
+            raise TypeError("get() takes one or two arguments, like ('A1',) or (2, 5)")
+
         if not isinstance(column, int):
             raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
         if not isinstance(row, int):
@@ -436,9 +462,11 @@ class Sheet():
             raise TypeError('row indices must be integers, not %s' % (type(row).__name__))
         if row < 1:
             raise IndexError('Row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (row))
-        if not isinstance(values, Iterable):
-            raise TypeError('values must be an iterable, not %s' % (type(values).__name__))
+        if not isinstance(values, (list, tuple)):
+            raise TypeError('values must be a list or tuple, not %s' % (type(values).__name__))
 
+        if isinstance(values, tuple):
+            values = list(values)
         if len(values) < self._columnCount:
             values.extend([''] * (self._columnCount - len(values)))
 
@@ -462,11 +490,13 @@ class Sheet():
             raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
         if isinstance(column, int) and column < 1:
             raise IndexError('Column %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (column))
-        if not isinstance(values, Iterable):
-            raise TypeError('values must be an iterable, not %s' % (type(values).__name__))
+        if not isinstance(values, (list, tuple)):
+            raise TypeError('values must be a list or tuple, not %s' % (type(values).__name__))
         if isinstance(column, str) and not column.isalpha():
             raise ValueError('Column %s does not exist. Columns must be a 1-based int or a letters-only str.')
 
+        if isinstance(values, tuple):
+            values = list(values)
         if isinstance(column, str):
             column = getColumnNumber(column)
 
@@ -483,47 +513,85 @@ class Sheet():
                 'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
                 }
             )
-        response = request.execute()
-        print(response)
+        request.execute()
 
         self._dataIsFresh = False
 
     def updateAll(self, values):
         # Ensure that `values` is a list of lists:
+        if not isinstance(values, list):
+            if isinstance(values, tuple):
+                values = list(values)
+            else:
+                raise TypeError('values arg must be a list or tuple, not %s' % (type(values).__name__))
+            for i, innerList in enumerate(values):
+                if not isinstance(innerList, list):
+                    if isinstance(innerList, tuple):
+                        values[i] = list(innerList)
+                    else:
+                        raise TypeError('values[%r] must be a list or tuple, not %s' % (type(innerList).__name__))
 
 
-        # Find out the dimensions of `values`
+        # Find out the dimensions of `values`, lengthen them to the size of the sheet if needed.
         valRowCount = len(values)
-        #valColumnCount = max([len(row) for row in values])
-        # LEFT OFF
-
         if valRowCount < self._rowCount:
-            values.extend([''] * (self._rowCount - valRowCount))
-
+            values.extend([[''] for i in range(self._rowCount - valRowCount)])
         for row in values:
-            row.extend([''] * (self.__columnCount - len(row)))
-
-
+            row.extend([''] * (self._columnCount - len(row)))
 
         if self._majorDimension == 'ROWS':
-            return copy.deepcopy(self._cells)
+            pass # Nothing needs to be done if majorDimension is already 'ROWS'
         elif self._majorDimension == 'COLUMNS':
             # self._cells' inner lists represent columns, not rows. But getAll() should always return a ROWS-major dimensioned structure.
             cells = []
 
             longestColumnLength = max([len(column) for column in self._cells])
             for rowIndex in range(longestColumnLength):
-                rowList = []
+                rowList = [] # create the data for the row
                 for columnData in self._cells:
                     if rowIndex < len(columnData):
                         rowList.append(columnData[rowIndex])
                     else:
                         rowList.append('')
                 cells.append(rowList)
-
-            return cells
+            values = cells
         else:
-            assert False, 'self._majorDimension is set to %s instead of "ROWS" or "COLUMNS"' % (self._majorDimension)
+            assert False, 'self._majorDimension is set to %r instead of "ROWS" or "COLUMNS"' % (self._majorDimension)
+
+        # Send the API request that updates the Google sheet.
+        request = SERVICE.spreadsheets().values().update(
+            spreadsheetId=self._spreadsheet._spreadsheetId,
+            range='%s!A1:%s%s' % (self._title, getColumnLetterOf(len(values[0])), len(values)),
+            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+            body={
+                'majorDimension': 'ROWS',
+                'values': values,
+                'range': '%s!A1:%s%s' % (self._title, getColumnLetterOf(len(values[0])), len(values)),
+                }
+            )
+        response = request.execute()
+        print(response)
+
+        self._dataIsFresh = False
+
+
+    def copyTo(self, destinationSpreadsheetId):
+        request = SERVICE.spreadsheets().sheets().copyTo(spreadsheetId=self._spreadsheet._spreadsheetId,
+                                                         sheetId=self._sheetId,
+                                                         body={'destinationSpreadsheetId': destinationSpreadsheetId})
+        request.execute()
+
+    def delete(self):
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+            body={
+                'requests': [{'deleteSheet': {'sheetId': self._sheetId}}],
+                'includeSpreadsheetInResponse': False,
+                'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
+                'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
+            })
+        request.execute()
+        self._dataIsFresh = False
+        self._spreadsheet.refresh() # Refresh the spreadsheet's list of sheets.
 
 
     def downloadAsCSV(self):
@@ -540,6 +608,56 @@ class Sheet():
         pass # TODO
 
 
+def _getTabColorArg(value):
+    if isinstance(value, str):
+        # value is a color string from colorvalues.py, like 'red' or 'black'
+        tabColorArg = {
+            'red': COLORS[value][0],
+            'green': COLORS[value][1],
+            'blue': COLORS[value][2],
+            'alpha': COLORS[value][3],
+        }
+
+    #elif value is None: # TODO - apparently there's no way to reset the color through the api?
+    #    tabColorArg = {} # Reset the color
+    else:
+        # value is a tuple of three or four floats (ranged from 0.0 to 1.0)
+        tabColorArg = {
+            'red': float(value[0]),
+            'green': float(value[1]),
+            'blue': float(value[2]),
+        }
+        try:
+            tabColorArg['alpha'] = value[3]
+        except:
+            tabColorArg['alpha'] = 1.0
+    return tabColorArg
+
+
+def convertToColumnRowInts(arg):
+    if not isinstance(arg, str):
+        raise TypeError("argument must be a grid cell str, like 'A1', not of type %s" % (type(arg).__name__))
+    if not arg.isalphanum() or not arg.isalpha() or not arg[-1].isdecimal():
+        raise ValueError("argument must be a grid cell str, like 'A1', not %r" % (arg))
+    for i in range(len(1, arg)):
+        if i.isdecimal():
+            column = getColumnNumber(arg[:i])
+            row = int(arg[i:])
+
+    return (column, row)
+
+
+def createSpreadsheet(title=''):
+    if not IS_INITIALIZED: init() # Initialize this module if not done so already.
+    request = SERVICE.spreadsheets().create(body={
+        'properties': {'title': title}
+        })
+    response = request.execute()
+
+    return Spreadsheet(response['spreadsheetId'])
+
+
+
 def getIdFromUrl(url):
     # https://docs.google.com/spreadsheets/d/16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c/edit#gid=0
     if url.startswith('https://docs.google.com/spreadsheets/d/'):
@@ -547,8 +665,14 @@ def getIdFromUrl(url):
     else:
         return url
 
+
 def getColumnLetterOf(columnNumber):
     """getColumnLetterOf(1) => 'A', getColumnLetterOf(27) => 'AA'"""
+    if not isinstance(columnNumber, int):
+        raise TypeError('columnNumber must be an int, not a %r' % (type(columnNumber).__name__))
+    if columnNumber < 1:
+        raise ValueError('columnNumber must be an int value of at least 1')
+
     letters = []
     while columnNumber > 0:
         columnNumber, remainder = divmod(columnNumber, 26)
@@ -558,8 +682,14 @@ def getColumnLetterOf(columnNumber):
         letters.append(chr(remainder + 64))
     return ''.join(reversed(letters))
 
+
 def getColumnNumber(columnLetter):
     """getColumnNumber('A') => 1, getColumnNumber('AA') => 27"""
+    if not isinstance(columnLetter, str):
+        raise TypeError('columnLetter must be a str, not a %r' % (type(columnLetter).__name__))
+    if not columnLetter.isalpha():
+        raise ValueError('columnLetter must be composed of only letters')
+
     columnLetter = columnLetter.upper()
     digits = []
 
@@ -576,9 +706,8 @@ def getColumnNumber(columnLetter):
     return number
 
 
-
-def init(tokenFile='token.pickle', credentialsFile='credentials.json'):
-    global SERVICE
+def init(credentialsFile='credentials.json', tokenFile='token.pickle'):
+    global SERVICE, IS_INITIALIZED
 
     if not os.path.exists(credentialsFile):
         raise EZSheetsException('Can\'t find credentials file at %s. You can download this file from https://developers.google.com/gmail/api/quickstart/python and clicking "Enable the Gmail API"' % (os.path.abspath(credentialsFile)))
@@ -603,9 +732,10 @@ def init(tokenFile='token.pickle', credentialsFile='credentials.json'):
             pickle.dump(creds, token)
 
     SERVICE = build('sheets', 'v4', credentials=creds)
+    IS_INITIALIZED = True
 
 
 
 
 init()
-#s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
+s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
