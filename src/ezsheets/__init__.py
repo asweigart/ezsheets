@@ -1,7 +1,7 @@
 # EZSheets
 # By Al Sweigart al@inventwithpython.com
 
-import pickle, copy
+import pickle, copy, re
 import os.path
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -85,12 +85,15 @@ class Spreadsheet():
         #self.timeZone = response['properties']['timeZone']
         self._title = response['properties']['title']
 
+        # TODO!!!!!!!! Every time we call refresh, we're recreating the Sheet objects. BAD!!!!
+
         self.sheets = []
         for i, sheetInfo in enumerate(response['sheets']):
             sheetId = sheetInfo['properties']['sheetId']
             gp = sheetInfo['properties']['gridProperties'] # syntactic sugar
             additionalArgs = {'title':                   sheetInfo['properties']['title'],
                               'index':                   i,
+                              'tabColor':                gp.get('tabColor'),
                               'rowCount':                gp.get('rowCount'),
                               'columnCount':             gp.get('columnCount'),
                               'frozenRowCount':          gp.get('frozenRowCount'),
@@ -133,7 +136,7 @@ class Spreadsheet():
             'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
         })
         request.execute()
-        s._title = value
+        self._title = value
 
 
     def addSheet(self, title='', rowCount=100, columnCount=12, index=None, tabColor=None):
@@ -160,13 +163,14 @@ class Spreadsheet():
         })
         request.execute()
 
-        self._dataIsFresh = False
+        self.refresh()
+        return self._spreadsheet.sheets[index]
 
 
 
 class Sheet():
     def __init__(self, spreadsheet, sheetId, **kwargs):
-        if not IS_INITIALIZED: init() # Initialize this module if not done so already.
+        #if not IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
 
         self._spreadsheet = spreadsheet
         self._sheetId = sheetId
@@ -179,6 +183,8 @@ class Sheet():
         self._hideGridlines           = kwargs.get('hideGridlines')
         self._rowGroupControlAfter    = kwargs.get('rowGroupControlAfter')
         self._columnGroupControlAfter = kwargs.get('columnGroupControlAfter')
+
+        self._tabColor = kwargs.get('tabColor') # LEFT OFF
 
         self._dataIsFresh = False
         self._data = None
@@ -226,7 +232,7 @@ class Sheet():
             'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
         })
         request.execute()
-        self._tabColor = value
+        self._tabColor = tabColorArg
 
 
     @property
@@ -609,7 +615,7 @@ class Sheet():
 
 
 def _getTabColorArg(value):
-    if isinstance(value, str):
+    if isinstance(value, str) and value in COLORS:
         # value is a color string from colorvalues.py, like 'red' or 'black'
         tabColorArg = {
             'red': COLORS[value][0],
@@ -620,7 +626,7 @@ def _getTabColorArg(value):
 
     #elif value is None: # TODO - apparently there's no way to reset the color through the api?
     #    tabColorArg = {} # Reset the color
-    else:
+    elif isinstance(value, (list, tuple)) and len(value) in (3, 4):
         # value is a tuple of three or four floats (ranged from 0.0 to 1.0)
         tabColorArg = {
             'red': float(value[0]),
@@ -631,20 +637,24 @@ def _getTabColorArg(value):
             tabColorArg['alpha'] = value[3]
         except:
             tabColorArg['alpha'] = 1.0
+    else:
+        raise ValueError("value argument must be a color string like 'red' or a 3- or 4-float tuple for an RGB or RGBA value")
     return tabColorArg
 
 
 def convertToColumnRowInts(arg):
     if not isinstance(arg, str):
         raise TypeError("argument must be a grid cell str, like 'A1', not of type %s" % (type(arg).__name__))
-    if not arg.isalphanum() or not arg.isalpha() or not arg[-1].isdecimal():
+    if not arg.isalnum() or not arg[0].isalpha() or not arg[-1].isdecimal():
         raise ValueError("argument must be a grid cell str, like 'A1', not %r" % (arg))
-    for i in range(len(1, arg)):
-        if i.isdecimal():
+
+    for i in range(1, len(arg)):
+        if arg[i].isdecimal():
             column = getColumnNumber(arg[:i])
             row = int(arg[i:])
+            return (column, row)
 
-    return (column, row)
+    assert False # pragma: no cover We know this will always return before this point because arg[-1].isdecimal().
 
 
 def createSpreadsheet(title=''):
@@ -657,13 +667,16 @@ def createSpreadsheet(title=''):
     return Spreadsheet(response['spreadsheetId'])
 
 
-
 def getIdFromUrl(url):
     # https://docs.google.com/spreadsheets/d/16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c/edit#gid=0
     if url.startswith('https://docs.google.com/spreadsheets/d/'):
-        return url[39:url.find('/', 39)]
+        spreadsheetId = url[39:url.find('/', 39)]
     else:
-        return url
+        spreadsheetId = url
+
+    if re.match('^([a-zA-Z0-9]|_|-)+$', spreadsheetId) is None:
+        raise ValueError('url argument must be an alphanumeric id or a full URL')
+    return spreadsheetId
 
 
 def getColumnLetterOf(columnNumber):
