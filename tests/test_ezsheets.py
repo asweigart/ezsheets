@@ -373,7 +373,7 @@ def test_str_sheet(init, checkPreAndPostCondition):
 
 
 def test_repr_sheet(init, checkPreAndPostCondition):
-    assert repr(FIXED_SPREADSHEET[0]) == "Sheet(title='Sheet1', sheetId=0, rowCount=1000, columnCount=26, frozenRowCount=0, frozenColumnCount=0)"
+    assert repr(FIXED_SPREADSHEET[0]) == "Sheet(sheetId=0, title='Sheet1', rowCount=1000, columnCount=26)"
 
 
 def test_update_and_get(init, checkPreAndPostCondition):
@@ -403,6 +403,20 @@ def test_update_and_get(init, checkPreAndPostCondition):
     newSheet.updateAll([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
     assert newSheet.getAll() == [['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']]
 
+    # Get a cell that is outside the original range of the rowCount and columnCount
+    assert newSheet.get(9999, 1) == ''
+    assert newSheet.get(1, 9999) == ''
+    assert newSheet.get(9999, 9999) == ''
+
+    assert newSheet.update(9999, 1) == 'cat'
+    assert newSheet.update(1, 9999) == 'dog'
+    assert newSheet.update(9999, 9999) == 'moose'
+
+    assert newSheet.get(9999, 1) == 'cat'
+    assert newSheet.get(1, 9999) == 'dog'
+    assert newSheet.get(9999, 9999) == 'moose'
+
+
     # Test with invalid coordinate.
     with pytest.raises(TypeError):
         newSheet.get(1, 2, 3, 4, 5) # Test with too many arguments.
@@ -424,18 +438,10 @@ def test_update_and_get(init, checkPreAndPostCondition):
 
     # Test with bad indexes
     with pytest.raises(IndexError):
-        newSheet.get(9999, 1) # Test with wrong argument type.
-    with pytest.raises(IndexError):
-        newSheet.get(1, 9999) # Test with wrong argument type.
-    with pytest.raises(IndexError):
         newSheet.get(-1, 1) # Test with wrong argument type.
     with pytest.raises(IndexError):
         newSheet.get(1, -1) # Test with wrong argument type.
 
-    with pytest.raises(IndexError):
-        newSheet.update(9999, 1) # Test with wrong argument type.
-    with pytest.raises(IndexError):
-        newSheet.update(1, 9999) # Test with wrong argument type.
     with pytest.raises(IndexError):
         newSheet.update(-1, 1) # Test with wrong argument type.
     with pytest.raises(IndexError):
