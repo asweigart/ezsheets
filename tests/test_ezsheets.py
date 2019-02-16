@@ -13,6 +13,30 @@ same folder as this script. A new spreadsheet will be created for use by this
 script.
 """
 
+
+def checkIfSpreadsheetInOriginalState():
+    # Check if there exists only one Sheet in the FIXED_SPREADSHEET Spreadsheet object.
+    assert FIXED_SPREADSHEET.title == 'Delete Me'
+    assert len(FIXED_SPREADSHEET) == 1
+    assert FIXED_SPREADSHEET[0].title == 'Sheet1'
+
+
+def addOriginalSheet():
+    # If we delete all the sheets in FIXED_SPREADSHEET, call this to restore the original Sheet1 Sheet object.
+    assert 'Sheet1' not in FIXED_SPREADSHEET.sheetTitles
+    FIXED_SPREADSHEET.addSheet(title='Sheet1')
+    checkIfSpreadsheetInOriginalState()
+
+
+@pytest.fixture
+def checkPreAndPostCondition():
+    # Check that Spreadsheet is in original condition before the test.
+    checkIfSpreadsheetInOriginalState()
+    yield
+    # Check that Spreadsheet is in original condition after the test.
+    checkIfSpreadsheetInOriginalState()
+
+
 def test_basic():
     pass # TODO - add unit tests
 
@@ -99,31 +123,326 @@ def init():
     global FIXED_SPREADSHEET
     ezsheets.init()
     FIXED_SPREADSHEET = ezsheets.createSpreadsheet(title='Delete Me')
+    checkIfSpreadsheetInOriginalState()
 
 
-def test_Spreadsheet_attr(init):
+def test_Spreadsheet_attr(init, checkPreAndPostCondition):
     assert FIXED_SPREADSHEET.title == 'Delete Me'
     assert FIXED_SPREADSHEET.spreadsheetId != ''
     assert FIXED_SPREADSHEET.sheetTitles == ('Sheet1',)
-    assert len(FIXED_SPREADSHEET.sheets) == 1
+    assert len(FIXED_SPREADSHEET) == 1
 
 
-def test_addSheet_deleteSheet(init):
-    numOfSheetsBeforeAdding = len(FIXED_SPREADSHEET.sheets)
-    FIXED_SPREADSHEET.addSheet(title='Added Sheet', rowCount=101, columnCount=13, tabColor='red')
-    assert len(FIXED_SPREADSHEET.sheets) == numOfSheetsBeforeAdding + 1
+def test_addSheet_deleteSheet(init, checkPreAndPostCondition):
+    numOfSheetsBeforeAdding = len(FIXED_SPREADSHEET)
+    newSheet = FIXED_SPREADSHEET.addSheet(title='Added Sheet', rowCount=101, columnCount=13, tabColor='red')
+    assert len(FIXED_SPREADSHEET) == numOfSheetsBeforeAdding + 1
 
     assert 'Added Sheet' in FIXED_SPREADSHEET.sheetTitles
-    newSheet = FIXED_SPREADSHEET.sheets[-1]
+    assert newSheet == FIXED_SPREADSHEET.sheets[-1]
     assert newSheet.title == 'Added Sheet'
     assert newSheet.index == numOfSheetsBeforeAdding
     assert newSheet.rowCount == 101
     assert newSheet.columnCount == 13
     assert newSheet.tabColor == {'red': 1.0, 'green': 0.0, 'blue': 0.0, 'alpha': 1.0}
 
-    assert newSheet.delete()
-    assert len(FIXED_SPREADSHEET.sheets) == numOfSheetsBeforeAdding
+    newSheet.delete()
+    assert len(FIXED_SPREADSHEET) == numOfSheetsBeforeAdding
     assert 'Added Sheet' not in FIXED_SPREADSHEET.sheetTitles
+
+
+def test_getitem_delitem(init, checkPreAndPostCondition):
+    assert FIXED_SPREADSHEET['Sheet1'].title == 'Sheet1'
+
+    # Attempt get with invalid index:
+    with pytest.raises(KeyError):
+        FIXED_SPREADSHEET[99]
+    with pytest.raises(KeyError):
+        FIXED_SPREADSHEET[-99]
+    with pytest.raises(KeyError):
+        FIXED_SPREADSHEET['nonexistent title']
+    with pytest.raises(KeyError):
+        FIXED_SPREADSHEET[['invalid', 'key', 'type']]
+
+    # Attempt delete with invalid index:
+    with pytest.raises(KeyError):
+        del FIXED_SPREADSHEET[99]
+    with pytest.raises(KeyError):
+        del FIXED_SPREADSHEET[-99]
+    with pytest.raises(KeyError):
+        del FIXED_SPREADSHEET['nonexistent title']
+    with pytest.raises(TypeError):
+        del FIXED_SPREADSHEET[['invalid', 'key', 'type']]
+
+    newSheet = FIXED_SPREADSHEET.addSheet(title='Added Sheet', rowCount=101, columnCount=13, tabColor='red')
+    assert FIXED_SPREADSHEET[1] == newSheet # Get by int index.
+    assert FIXED_SPREADSHEET[-1] == newSheet # Get by negative index.
+    assert FIXED_SPREADSHEET[1].title == 'Added Sheet'
+
+    assert FIXED_SPREADSHEET[1:2] == (newSheet,) # Get by slice
+
+    # Delete by int index:
+    del FIXED_SPREADSHEET[1]
+    checkIfSpreadsheetInOriginalState()
+
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 2', rowCount=101, columnCount=13, tabColor='red')
+    # Get by str title:
+    assert FIXED_SPREADSHEET['Added Sheet 2'].title == 'Added Sheet 2'
+
+    # Delete by str title:
+    del FIXED_SPREADSHEET['Added Sheet 2']
+    checkIfSpreadsheetInOriginalState()
+
+    # Get multiple sheets with slice:
+    newSheet3 = FIXED_SPREADSHEET.addSheet(title='Added Sheet 3', rowCount=101, columnCount=13, tabColor='red')
+    newSheet4 = FIXED_SPREADSHEET.addSheet(title='Added Sheet 4', rowCount=101, columnCount=13, tabColor='red')
+    assert FIXED_SPREADSHEET[1:3] == (newSheet3, newSheet4)
+
+    # Delete multiple sheets with slice:
+    del FIXED_SPREADSHEET[1:3] # deleting newSheet3 and newSheet4
+    checkIfSpreadsheetInOriginalState()
+
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 5', rowCount=101, columnCount=13, tabColor='red')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 6', rowCount=101, columnCount=13, tabColor='red')
+    del FIXED_SPREADSHEET[1:] # deleting newSheet5 and newSheet6
+    checkIfSpreadsheetInOriginalState()
+
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 7', index=0, rowCount=101, columnCount=13, tabColor='red')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 8', index=1, rowCount=101, columnCount=13, tabColor='red')
+    del FIXED_SPREADSHEET[:2]
+    checkIfSpreadsheetInOriginalState()
+
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 9', rowCount=101, columnCount=13, tabColor='red')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 10', rowCount=101, columnCount=13, tabColor='red')
+    del FIXED_SPREADSHEET[3:0:-1]
+    checkIfSpreadsheetInOriginalState()
+
+    # Attempt to delete all sheets:
+    with pytest.raises(ValueError):
+        del FIXED_SPREADSHEET[0]
+
+    # Attempt to delete all sheets:
+    with pytest.raises(ValueError):
+        del FIXED_SPREADSHEET[0:1]
+
+    # Deleting with negative start or stop in slice is a no-op
+    del FIXED_SPREADSHEET[-1:]
+    del FIXED_SPREADSHEET[:-1]
+
+
+def test_len(init, checkPreAndPostCondition):
+    # The length of a Spreadsheet object is how many Sheet objects it contains.
+    assert len(FIXED_SPREADSHEET) == len(FIXED_SPREADSHEET.sheets)
+    FIXED_SPREADSHEET.addSheet(title='Length Test Sheet')
+    assert len(FIXED_SPREADSHEET) == len(FIXED_SPREADSHEET.sheets)
+    del FIXED_SPREADSHEET[-1]
+    assert len(FIXED_SPREADSHEET) == len(FIXED_SPREADSHEET.sheets)
+
+
+
+def test_changeSheetIndex(init, checkPreAndPostCondition):
+    newSheet1 = FIXED_SPREADSHEET.addSheet(title='New Sheet 1')
+    newSheet2 = FIXED_SPREADSHEET.addSheet(title='New Sheet 2')
+
+    assert FIXED_SPREADSHEET.sheetTitles == ('Sheet1', 'New Sheet 1', 'New Sheet 2')
+
+    # Move 'New Sheet 2' to front:
+    newSheet2.index = 0
+    assert newSheet2.index == 0
+    assert FIXED_SPREADSHEET[0] == newSheet2
+    assert FIXED_SPREADSHEET.sheetTitles == ('New Sheet 2', 'Sheet1', 'New Sheet 1')
+
+    newSheet2.index = 1
+    assert newSheet2.index == 1
+    assert FIXED_SPREADSHEET[1] == newSheet2
+    assert FIXED_SPREADSHEET[1].title == 'New Sheet 2'
+    assert FIXED_SPREADSHEET.sheetTitles == ('Sheet1', 'New Sheet 2', 'New Sheet 1')
+
+    newSheet1.index = 1
+    assert newSheet1.index == 1
+    assert FIXED_SPREADSHEET[1] == newSheet1
+    assert FIXED_SPREADSHEET[1].title == 'New Sheet 1'
+    assert FIXED_SPREADSHEET.sheetTitles == ('Sheet1', 'New Sheet 1', 'New Sheet 2')
+
+    # Test no change to index:
+    newSheet1.index = 1
+    assert newSheet1.index == 1
+    assert FIXED_SPREADSHEET[1] == newSheet1
+    assert FIXED_SPREADSHEET[1].title == 'New Sheet 1'
+    assert FIXED_SPREADSHEET.sheetTitles == ('Sheet1', 'New Sheet 1', 'New Sheet 2')
+
+    # Test negative index:
+    newSheet1.index = -1
+    assert newSheet1.index == 2
+    assert FIXED_SPREADSHEET[2] == newSheet1
+    assert FIXED_SPREADSHEET[2].title == 'New Sheet 1'
+    assert FIXED_SPREADSHEET.sheetTitles == ('Sheet1', 'New Sheet 2', 'New Sheet 1')
+
+    # Check setting to invalid index:
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].index = 1.0
+    with pytest.raises(IndexError):
+        FIXED_SPREADSHEET[0].index = 9999
+    with pytest.raises(IndexError):
+        FIXED_SPREADSHEET[0].index = -9999
+
+    newSheet1.delete()
+    newSheet2.delete()
+
+
+def test_iter(init, checkPreAndPostCondition):
+    FIXED_SPREADSHEET.addSheet(title='New Sheet 1')
+    FIXED_SPREADSHEET.addSheet(title='New Sheet 2')
+
+    for i, sheet in enumerate(FIXED_SPREADSHEET):
+        if i == 0:
+            assert sheet.title == 'Sheet1'
+        elif i == 1:
+            assert sheet.title == 'New Sheet 1'
+        elif i == 2:
+            assert sheet.title == 'New Sheet 2'
+
+    del FIXED_SPREADSHEET[1] # delete New Sheet 1
+    del FIXED_SPREADSHEET[1] # delete New Sheet 2
+    checkIfSpreadsheetInOriginalState()
+
+
+def test_str_spreadsheet(init, checkPreAndPostCondition):
+    assert str(FIXED_SPREADSHEET) == '<Spreadsheet title="Delete Me", 1 sheets>'
+
+
+def test_repr_spreadsheet(init, checkPreAndPostCondition):
+    assert repr(FIXED_SPREADSHEET) == 'Spreadsheet(spreadsheetId=%r)' % (FIXED_SPREADSHEET.spreadsheetId)
+
+
+def test_title_spreadsheet(init, checkPreAndPostCondition):
+    assert FIXED_SPREADSHEET.title == 'Delete Me'
+    FIXED_SPREADSHEET.title = 'New Title'
+    assert FIXED_SPREADSHEET.title == 'New Title'
+    FIXED_SPREADSHEET.refresh()
+    assert FIXED_SPREADSHEET.title == 'New Title'
+    FIXED_SPREADSHEET.title = 'Delete Me'
+    checkIfSpreadsheetInOriginalState()
+
+
+def test_title_sheet(init, checkPreAndPostCondition):
+    assert FIXED_SPREADSHEET[0].title == 'Sheet1'
+    FIXED_SPREADSHEET[0].title = 'New Title'
+    assert FIXED_SPREADSHEET[0].title == 'New Title'
+    FIXED_SPREADSHEET.refresh()
+    assert FIXED_SPREADSHEET[0].title == 'New Title'
+    FIXED_SPREADSHEET[0].title = 'Sheet1'
+    checkIfSpreadsheetInOriginalState()
+
+
+def test_spreadsheet_attr(init, checkPreAndPostCondition):
+    assert FIXED_SPREADSHEET[0].spreadsheet == FIXED_SPREADSHEET
+
+
+def test_tabColor(init, checkPreAndPostCondition):
+    newSheet = FIXED_SPREADSHEET.addSheet(title='New Sheet 1')
+    newSheet.tabColor = 'red'
+    assert newSheet.tabColor == {'red': 1.0, 'green': 0.0, 'blue': 0.0, 'alpha': 1.0}
+    FIXED_SPREADSHEET.refresh()
+    assert newSheet.tabColor == {'red': 1.0, 'green': 0.0, 'blue': 0.0, 'alpha': 1.0}
+
+    newSheet.tabColor = {'red': 0.0, 'green': 1.0, 'blue': 0.0, 'alpha': 1.0}
+    assert newSheet.tabColor == {'red': 0.0, 'green': 1.0, 'blue': 0.0, 'alpha': 1.0}
+
+    newSheet.delete()
+
+
+def test_eq(init, checkPreAndPostCondition):
+    assert FIXED_SPREADSHEET[0] == FIXED_SPREADSHEET[0]
+    assert FIXED_SPREADSHEET[0] != 'some misc value'
+
+
+def test_sheet_attrs(init, checkPreAndPostCondition):
+    sheet1 = FIXED_SPREADSHEET[0]
+    assert sheet1.rowCount == 1000
+    assert sheet1.columnCount == 26
+    assert sheet1.frozenRowCount == 0
+    assert sheet1.frozenColumnCount == 0
+    assert sheet1.hideGridlines == None
+    assert sheet1.rowGroupControlAfter == None
+    assert sheet1.columnGroupControlAfter == None
+
+
+def test_str_sheet(init, checkPreAndPostCondition):
+    assert str(FIXED_SPREADSHEET[0]) == '<Sheet title=\'Sheet1\', sheetId=%r, rowCount=1000, columnCount=26>' % (FIXED_SPREADSHEET[0].sheetId)
+
+
+def test_repr_sheet(init, checkPreAndPostCondition):
+    assert repr(FIXED_SPREADSHEET[0]) == "Sheet(title='Sheet1', sheetId=0, rowCount=1000, columnCount=26, frozenRowCount=0, frozenColumnCount=0)"
+
+
+def test_update_and_get(init, checkPreAndPostCondition):
+    newSheet = FIXED_SPREADSHEET.addSheet(title='New Sheet 1')
+
+    # Update a cell with column/row coordinates:
+    newSheet.update(1, 1, 'new value')
+    assert newSheet.get(1, 1) == 'new value'
+
+    # Update a cell with A1 coordinates:
+    newSheet.update('B2', 'b2 value')
+    assert newSheet.get('B2') == 'b2 value'
+
+    # Update a column:
+    newSheet.updateColumn(1, ['a', 'b', 'c'])
+    assert newSheet.getColumn(1) == ['a', 'b', 'c']
+
+    # Update a column:
+    newSheet.updateColumn('C', ['x', 'y', 'z'])
+    assert newSheet.getColumn('C') == ['x', 'y', 'z']
+
+    # Update a row:
+    newSheet.updateRow(1, ['d', 'e', 'f'])
+    assert newSheet.getRow(1) == ['d', 'e', 'f']
+
+    # Update all:
+    newSheet.updateAll([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
+    assert newSheet.getAll() == [['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']]
+
+    # Test with invalid coordinate.
+    with pytest.raises(TypeError):
+        newSheet.get(1, 2, 3, 4, 5) # Test with too many arguments.
+    with pytest.raises(TypeError):
+        newSheet.get() # Test with too few arguments.
+    with pytest.raises(TypeError):
+        newSheet.get(4.2, 1) # Test with wrong argument type.
+    with pytest.raises(TypeError):
+        newSheet.get(1, 4.2) # Test with wrong argument type.
+
+    with pytest.raises(TypeError):
+        newSheet.update(1, 2, 3, 4, 5) # Test with too many arguments.
+    with pytest.raises(TypeError):
+        newSheet.update() # Test with too few arguments.
+    with pytest.raises(TypeError):
+        newSheet.update(4.2, 1) # Test with wrong argument type.
+    with pytest.raises(TypeError):
+        newSheet.update(1, 4.2) # Test with wrong argument type.
+
+    # Test with bad indexes
+    with pytest.raises(IndexError):
+        newSheet.get(9999, 1) # Test with wrong argument type.
+    with pytest.raises(IndexError):
+        newSheet.get(1, 9999) # Test with wrong argument type.
+    with pytest.raises(IndexError):
+        newSheet.get(-1, 1) # Test with wrong argument type.
+    with pytest.raises(IndexError):
+        newSheet.get(1, -1) # Test with wrong argument type.
+
+    with pytest.raises(IndexError):
+        newSheet.update(9999, 1) # Test with wrong argument type.
+    with pytest.raises(IndexError):
+        newSheet.update(1, 9999) # Test with wrong argument type.
+    with pytest.raises(IndexError):
+        newSheet.update(-1, 1) # Test with wrong argument type.
+    with pytest.raises(IndexError):
+        newSheet.update(1, -1) # Test with wrong argument type.
+
+
+    newSheet.delete()
 
 if __name__ == '__main__':
     pytest.main()

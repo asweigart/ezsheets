@@ -7,12 +7,15 @@ from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 #SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE = None
 IS_INITIALIZED = False
+
+DEFAULT_NEW_ROW_COUNT = 1000  # This is the Google Sheets default for a new Sheet.
+DEFAULT_NEW_COLUMN_COUNT = 26 # This is the Google Sheets default for a new Sheet.
 
 from ezsheets.colorvalues import COLORS
 
@@ -87,24 +90,88 @@ class Spreadsheet():
 
         # TODO!!!!!!!! Every time we call refresh, we're recreating the Sheet objects. BAD!!!!
 
-        self.sheets = []
+        sheets = []
+        if not hasattr(self, 'sheets'):
+            self.sheets = ()
         for i, sheetInfo in enumerate(response['sheets']):
             sheetId = sheetInfo['properties']['sheetId']
             gp = sheetInfo['properties']['gridProperties'] # syntactic sugar
             additionalArgs = {'title':                   sheetInfo['properties']['title'],
                               'index':                   i,
-                              'tabColor':                gp.get('tabColor'),
-                              'rowCount':                gp.get('rowCount'),
-                              'columnCount':             gp.get('columnCount'),
-                              'frozenRowCount':          gp.get('frozenRowCount'),
-                              'frozenColumnCount':       gp.get('frozenColumnCount'),
-                              'hideGridlines':           gp.get('hideGridlines'),
-                              'rowGroupControlAfter':    gp.get('rowGroupControlAfter'),
-                              'columnGroupControlAfter': gp.get('columnGroupControlAfter'),}
-            sheet = Sheet(self, sheetId, **additionalArgs)
-            self.sheets.append(sheet)
-        self.sheets = tuple(self.sheets) # Make sheets attribute an immutable tuple.
+                              'tabColor':                _getTabColorArg(sheetInfo['properties'].get('tabColor')),
+                              'rowCount':                gp.get('rowCount', DEFAULT_NEW_ROW_COUNT),
+                              'columnCount':             gp.get('columnCount', DEFAULT_NEW_COLUMN_COUNT),
+                              'frozenRowCount':          gp.get('frozenRowCount', 0),
+                              'frozenColumnCount':       gp.get('frozenColumnCount', 0),
+                              'hideGridlines':           gp.get('hideGridlines'), # TODO - add default
+                              'rowGroupControlAfter':    gp.get('rowGroupControlAfter'), # TODO - add default
+                              'columnGroupControlAfter': gp.get('columnGroupControlAfter'),} # TODO - add default
+
+            existingSheetIndex = None
+            try:
+                # If the sheet has been previously loaded, reuse that Sheet object:
+                existingSheetIndex = [sh.sheetId for sh in self.sheets].index(sheetId)
+            except ValueError:
+                pass # Do nothing.
+
+            if existingSheetIndex is not None:
+                # Update the info in the Sheet object:
+                for k, v in additionalArgs.items():
+                    setattr(self.sheets[existingSheetIndex], '_' + k, v) # Set the _backing variable for the property directly, otherwise it causes an infinite loop if we try to set the property.
+                sheets.append(self.sheets[existingSheetIndex])
+            else:
+                # If the sheet hasn't been seen before, create a new Sheet object:
+                sheets.append(Sheet(self, sheetId, **additionalArgs))
+
+        self.sheets = tuple(sheets) # Make sheets attribute an immutable tuple.
         self._dataIsFresh = True
+
+    def __getitem__(self, key):
+        try:
+            i = self.sheetTitles.index(key)
+            return self.sheets[i]
+        except ValueError:
+            pass # Do nothing if the title isn't found.
+
+
+        if isinstance(key, int) and (-len(self.sheets) <= key < len(self.sheets)):
+            return self.sheets[key]
+        if isinstance(key, slice):
+            return self.sheets[key]
+
+        raise KeyError('key must be an int between %s and %s or a str matching a title: %r' % (-(len(self.sheets)), len(self.sheets) - 1, self.sheetTitles))
+
+    def __delitem__(self, key):
+        if isinstance(key, (int, str)):
+            # Key is an int index or a str title.
+            self[key].delete()
+        elif isinstance(key, slice):
+            # TODO - there's got to be a better way to do this.
+            start = key.start if key.start is not None else 0
+            stop  = key.stop  if key.stop  is not None else len(self.sheets)
+            step  = key.step  if key.step  is not None else 1
+
+            if start < 0 or stop < 0:
+                return # When deleting list items with a slice, a negative start or stop results in a no-op. I'll mimic that behavior here.
+
+            indexesToDelete = [i for i in range(start, stop, step) if i >= 0 and i < len(self.sheets)] # Don't include invalid or negative indexes.
+            if len(indexesToDelete) == len(self.sheets):
+                raise ValueError('Cannot delete all sheets; spreadsheets must have at least one sheet')
+
+            if indexesToDelete[0] < indexesToDelete[-1]:
+                indexesToDelete.reverse() # We want this is descending order.
+
+            for i in indexesToDelete:
+                self.sheets[i].delete()
+
+        else:
+            raise TypeError('key must be an int index, str sheet title, or slice object, not %r' % (type(key).__name__))
+
+    def __len__(self):
+        return len(self.sheets)
+
+    def __iter__(self):
+        return iter(self.sheets)
 
     @property
     def spreadsheetId(self):
@@ -115,10 +182,10 @@ class Spreadsheet():
         return tuple([sheet.title for sheet in self.sheets])
 
     def __str__(self):
-        return '<%s title="%d", %s sheets>' % (type(self).__name__, self.title, len(self.sheets))
+        return '<%s title="%s", %d sheets>' % (type(self).__name__, self.title, len(self.sheets))
 
     def __repr__(self):
-        return '%s(spreadsheetId=%s)' % (type(self).__name__, self.spreadsheetId)
+        return '%s(spreadsheetId=%r)' % (type(self).__name__, self.spreadsheetId)
 
     @property
     def title(self):
@@ -139,7 +206,7 @@ class Spreadsheet():
         self._title = value
 
 
-    def addSheet(self, title='', rowCount=100, columnCount=12, index=None, tabColor=None):
+    def addSheet(self, title='', rowCount=DEFAULT_NEW_ROW_COUNT, columnCount=DEFAULT_NEW_COLUMN_COUNT, index=None, tabColor=None):
         if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
             self.refresh()
 
@@ -164,7 +231,7 @@ class Spreadsheet():
         request.execute()
 
         self.refresh()
-        return self._spreadsheet.sheets[index]
+        return self.sheets[index]
 
 
 
@@ -184,7 +251,10 @@ class Sheet():
         self._rowGroupControlAfter    = kwargs.get('rowGroupControlAfter')
         self._columnGroupControlAfter = kwargs.get('columnGroupControlAfter')
 
-        self._tabColor = kwargs.get('tabColor') # LEFT OFF
+        if kwargs.get('tabColor') is None:
+            self._tabColor = None
+        else:
+            self._tabColor = _getTabColorArg(kwargs.get('tabColor'))
 
         self._dataIsFresh = False
         self._data = None
@@ -220,7 +290,7 @@ class Sheet():
 
     @tabColor.setter
     def tabColor(self, value):
-        tabColorArg = self._getTabColorArg(value)
+        tabColorArg = _getTabColorArg(value)
 
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
         body={
@@ -244,8 +314,14 @@ class Sheet():
     def index(self, value):
         if not isinstance(value, int):
             raise TypeError('indices must be integers, not %s' % (type(value).__name__))
-        if value < 0:
-            raise ValueError('indices are 0-based, and must be 0 or greater, not %r' % (value))
+
+        if value < 0: # Handle negative indexes the way Python lists do.
+            if value < -len(self.spreadsheet.sheets):
+                raise IndexError('%r is out of range (-1 to %d)' % (value, -len(self.spreadsheet.sheets)))
+            value = len(self.spreadsheet.sheets) + value # convert this negative index into its corresponding positive index
+        if value >= len(self.spreadsheet.sheets):
+            raise IndexError('%r is out of range (0 to %d)' % (value, len(self.spreadsheet.sheets) - 1))
+
 
         if value == self.index:
             return # No change needed.
@@ -262,8 +338,15 @@ class Sheet():
             'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
         })
         request.execute()
-        self._spreadsheet.refresh() # Update the spreadsheet's tuple of Sheet objects to reflect the new order.
 
+        self._spreadsheet.refresh() # Update the spreadsheet's tuple of Sheet objects to reflect the new order.
+        self._index = self._spreadsheet.sheets.index(self) # Update the local Sheet object's index.
+
+
+    def __eq__(self, other):
+        if not isinstance(other, Sheet):
+            return False
+        return self._sheetId == other._sheetId
 
     @property
     def sheetId(self):
@@ -588,6 +671,9 @@ class Sheet():
         request.execute()
 
     def delete(self):
+        if len(self._spreadsheet.sheets) == 1:
+            raise ValueError('Cannot delete all sheets; spreadsheets must have at least one sheet')
+
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
             body={
                 'requests': [{'deleteSheet': {'sheetId': self._sheetId}}],
@@ -618,9 +704,9 @@ def _getTabColorArg(value):
     if isinstance(value, str) and value in COLORS:
         # value is a color string from colorvalues.py, like 'red' or 'black'
         tabColorArg = {
-            'red': COLORS[value][0],
+            'red':   COLORS[value][0],
             'green': COLORS[value][1],
-            'blue': COLORS[value][2],
+            'blue':  COLORS[value][2],
             'alpha': COLORS[value][3],
         }
 
@@ -637,8 +723,22 @@ def _getTabColorArg(value):
             tabColorArg['alpha'] = value[3]
         except:
             tabColorArg['alpha'] = 1.0
+    elif value is None:
+        return None # Represents no tabColor setting.
+    elif type(value) == dict:
+        tabColorArg = value
     else:
-        raise ValueError("value argument must be a color string like 'red' or a 3- or 4-float tuple for an RGB or RGBA value")
+        raise ValueError("value argument must be a color string like 'red', a 3- or 4-float tuple for an RGB or RGBA value, or a dict")
+
+    # Set any remaining unspecified defaults.
+    tabColorArg.setdefault('red', 0.0)
+    tabColorArg.setdefault('green', 0.0)
+    tabColorArg.setdefault('blue', 0.0)
+    tabColorArg.setdefault('alpha', 1.0)
+    tabColorArg['red']   = float(tabColorArg['red'])
+    tabColorArg['green'] = float(tabColorArg['green'])
+    tabColorArg['blue']  = float(tabColorArg['blue'])
+    tabColorArg['alpha'] = float(tabColorArg['alpha'])
     return tabColorArg
 
 
@@ -750,5 +850,5 @@ def init(credentialsFile='credentials.json', tokenFile='token.pickle'):
 
 
 
-#init()
-#s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
+init()
+s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
