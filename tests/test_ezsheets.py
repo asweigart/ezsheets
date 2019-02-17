@@ -19,6 +19,7 @@ def checkIfSpreadsheetInOriginalState():
     assert FIXED_SPREADSHEET.title == 'Delete Me'
     assert len(FIXED_SPREADSHEET) == 1
     assert FIXED_SPREADSHEET[0].title == 'Sheet1'
+    print('READS=%s, WRITES=%s' % (ezsheets._READ_REQUESTS, ezsheets._WRITE_REQUESTS))
 
 
 def addOriginalSheet():
@@ -134,21 +135,21 @@ def test_Spreadsheet_attr(init, checkPreAndPostCondition):
 
 
 def test_addSheet_deleteSheet(init, checkPreAndPostCondition):
-    numOfSheetsBeforeAdding = len(FIXED_SPREADSHEET)
-    newSheet = FIXED_SPREADSHEET.addSheet(title='Added Sheet', rowCount=101, columnCount=13, tabColor='red')
-    assert len(FIXED_SPREADSHEET) == numOfSheetsBeforeAdding + 1
+    newSheet1 = FIXED_SPREADSHEET.addSheet(title='New Sheet 1')
 
-    assert 'Added Sheet' in FIXED_SPREADSHEET.sheetTitles
-    assert newSheet == FIXED_SPREADSHEET.sheets[-1]
-    assert newSheet.title == 'Added Sheet'
-    assert newSheet.index == numOfSheetsBeforeAdding
-    assert newSheet.rowCount == 101
-    assert newSheet.columnCount == 13
-    assert newSheet.tabColor == {'red': 1.0, 'green': 0.0, 'blue': 0.0, 'alpha': 1.0}
+    assert 'New Sheet 1' in FIXED_SPREADSHEET.sheetTitles
+    assert newSheet1 == FIXED_SPREADSHEET.sheets[1]
+    assert newSheet1.title == 'New Sheet 1'
+    assert newSheet1.index == 1
 
-    newSheet.delete()
-    assert len(FIXED_SPREADSHEET) == numOfSheetsBeforeAdding
-    assert 'Added Sheet' not in FIXED_SPREADSHEET.sheetTitles
+    newSheet2 = FIXED_SPREADSHEET.addSheet(title='New Sheet 2', index=1)
+    assert newSheet2 == FIXED_SPREADSHEET.sheets[1]
+    assert newSheet2.index == 1
+    assert newSheet1 == FIXED_SPREADSHEET.sheets[2]
+    assert newSheet1.index == 2
+
+    newSheet1.delete()
+    newSheet2.delete()
 
 
 def test_getitem_delitem(init, checkPreAndPostCondition):
@@ -174,7 +175,7 @@ def test_getitem_delitem(init, checkPreAndPostCondition):
     with pytest.raises(TypeError):
         del FIXED_SPREADSHEET[['invalid', 'key', 'type']]
 
-    newSheet = FIXED_SPREADSHEET.addSheet(title='Added Sheet', rowCount=101, columnCount=13, tabColor='red')
+    newSheet = FIXED_SPREADSHEET.addSheet(title='Added Sheet')
     assert FIXED_SPREADSHEET[1] == newSheet # Get by int index.
     assert FIXED_SPREADSHEET[-1] == newSheet # Get by negative index.
     assert FIXED_SPREADSHEET[1].title == 'Added Sheet'
@@ -185,7 +186,7 @@ def test_getitem_delitem(init, checkPreAndPostCondition):
     del FIXED_SPREADSHEET[1]
     checkIfSpreadsheetInOriginalState()
 
-    FIXED_SPREADSHEET.addSheet(title='Added Sheet 2', rowCount=101, columnCount=13, tabColor='red')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 2')
     # Get by str title:
     assert FIXED_SPREADSHEET['Added Sheet 2'].title == 'Added Sheet 2'
 
@@ -194,26 +195,26 @@ def test_getitem_delitem(init, checkPreAndPostCondition):
     checkIfSpreadsheetInOriginalState()
 
     # Get multiple sheets with slice:
-    newSheet3 = FIXED_SPREADSHEET.addSheet(title='Added Sheet 3', rowCount=101, columnCount=13, tabColor='red')
-    newSheet4 = FIXED_SPREADSHEET.addSheet(title='Added Sheet 4', rowCount=101, columnCount=13, tabColor='red')
+    newSheet3 = FIXED_SPREADSHEET.addSheet(title='Added Sheet 3')
+    newSheet4 = FIXED_SPREADSHEET.addSheet(title='Added Sheet 4')
     assert FIXED_SPREADSHEET[1:3] == (newSheet3, newSheet4)
 
     # Delete multiple sheets with slice:
     del FIXED_SPREADSHEET[1:3] # deleting newSheet3 and newSheet4
     checkIfSpreadsheetInOriginalState()
 
-    FIXED_SPREADSHEET.addSheet(title='Added Sheet 5', rowCount=101, columnCount=13, tabColor='red')
-    FIXED_SPREADSHEET.addSheet(title='Added Sheet 6', rowCount=101, columnCount=13, tabColor='red')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 5')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 6')
     del FIXED_SPREADSHEET[1:] # deleting newSheet5 and newSheet6
     checkIfSpreadsheetInOriginalState()
 
-    FIXED_SPREADSHEET.addSheet(title='Added Sheet 7', index=0, rowCount=101, columnCount=13, tabColor='red')
-    FIXED_SPREADSHEET.addSheet(title='Added Sheet 8', index=1, rowCount=101, columnCount=13, tabColor='red')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 7', index=0)
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 8', index=1)
     del FIXED_SPREADSHEET[:2]
     checkIfSpreadsheetInOriginalState()
 
-    FIXED_SPREADSHEET.addSheet(title='Added Sheet 9', rowCount=101, columnCount=13, tabColor='red')
-    FIXED_SPREADSHEET.addSheet(title='Added Sheet 10', rowCount=101, columnCount=13, tabColor='red')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 9')
+    FIXED_SPREADSHEET.addSheet(title='Added Sheet 10')
     del FIXED_SPREADSHEET[3:0:-1]
     checkIfSpreadsheetInOriginalState()
 
@@ -239,7 +240,6 @@ def test_len(init, checkPreAndPostCondition):
     assert len(FIXED_SPREADSHEET) == len(FIXED_SPREADSHEET.sheets)
 
 
-
 def test_changeSheetIndex(init, checkPreAndPostCondition):
     newSheet1 = FIXED_SPREADSHEET.addSheet(title='New Sheet 1')
     newSheet2 = FIXED_SPREADSHEET.addSheet(title='New Sheet 2')
@@ -247,7 +247,8 @@ def test_changeSheetIndex(init, checkPreAndPostCondition):
     assert FIXED_SPREADSHEET.sheetTitles == ('Sheet1', 'New Sheet 1', 'New Sheet 2')
 
     # Move 'New Sheet 2' to front:
-    newSheet2.index = 0
+
+    newSheet2.index = 0  # LEFT OFF with error happening here, some quota issue? Am I just making too many calls with this test suite?
     assert newSheet2.index == 0
     assert FIXED_SPREADSHEET[0] == newSheet2
     assert FIXED_SPREADSHEET.sheetTitles == ('New Sheet 2', 'Sheet1', 'New Sheet 1')
@@ -363,9 +364,9 @@ def test_sheet_attrs(init, checkPreAndPostCondition):
     assert sheet1.columnCount == 26
     assert sheet1.frozenRowCount == 0
     assert sheet1.frozenColumnCount == 0
-    assert sheet1.hideGridlines == None
-    assert sheet1.rowGroupControlAfter == None
-    assert sheet1.columnGroupControlAfter == None
+    assert sheet1.hideGridlines == False
+    assert sheet1.rowGroupControlAfter == False
+    assert sheet1.columnGroupControlAfter == False
 
 
 def test_str_sheet(init, checkPreAndPostCondition):
@@ -408,13 +409,7 @@ def test_update_and_get(init, checkPreAndPostCondition):
     assert newSheet.get(1, 9999) == ''
     assert newSheet.get(9999, 9999) == ''
 
-    assert newSheet.update(9999, 1) == 'cat'
-    assert newSheet.update(1, 9999) == 'dog'
-    assert newSheet.update(9999, 9999) == 'moose'
-
-    assert newSheet.get(9999, 1) == 'cat'
-    assert newSheet.get(1, 9999) == 'dog'
-    assert newSheet.get(9999, 9999) == 'moose'
+    # TODO test enlarging the sheet with an update*() call.
 
 
     # Test with invalid coordinate.
@@ -427,6 +422,8 @@ def test_update_and_get(init, checkPreAndPostCondition):
     with pytest.raises(TypeError):
         newSheet.get(1, 4.2) # Test with wrong argument type.
 
+    with pytest.raises(TypeError):
+        newSheet.update(1, 1) # Test with missing update value.
     with pytest.raises(TypeError):
         newSheet.update(1, 2, 3, 4, 5) # Test with too many arguments.
     with pytest.raises(TypeError):
@@ -443,9 +440,9 @@ def test_update_and_get(init, checkPreAndPostCondition):
         newSheet.get(1, -1) # Test with wrong argument type.
 
     with pytest.raises(IndexError):
-        newSheet.update(-1, 1) # Test with wrong argument type.
+        newSheet.update(-1, 1, 'value') # Test with wrong argument type.
     with pytest.raises(IndexError):
-        newSheet.update(1, -1) # Test with wrong argument type.
+        newSheet.update(1, -1, 'value') # Test with wrong argument type.
 
 
     newSheet.delete()
