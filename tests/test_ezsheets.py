@@ -19,7 +19,7 @@ def checkIfSpreadsheetInOriginalState():
     assert FIXED_SPREADSHEET.title == 'Delete Me'
     assert len(FIXED_SPREADSHEET) == 1
     assert FIXED_SPREADSHEET[0].title == 'Sheet1'
-    print('READS=%s, WRITES=%s' % (ezsheets._READ_REQUESTS, ezsheets._WRITE_REQUESTS))
+    #print('READS=%s, WRITES=%s' % (ezsheets._READ_REQUESTS, ezsheets._WRITE_REQUESTS))
 
 
 def addOriginalSheet():
@@ -123,7 +123,17 @@ def test__getTabColorArg():
 def init():
     global FIXED_SPREADSHEET
     ezsheets.init()
-    FIXED_SPREADSHEET = ezsheets.createSpreadsheet(title='Delete Me')
+    #FIXED_SPREADSHEET = ezsheets.createSpreadsheet(title='Delete Me') # Create a new spreadsheet
+
+    # Use an existing spreadsheet:
+    FIXED_SPREADSHEET = ezsheets.Spreadsheet('https://docs.google.com/spreadsheets/d/1lRyPHuaLIgqYwkCTJYexbZUO1dcWeunm69B0L7L4ZQ8/edit#gid=0')
+    tempName = 'temp_%s' % (random.sample('abcdefg'*10, 10))
+    FIXED_SPREADSHEET.addSheet(tempName, index=0)
+    while len(FIXED_SPREADSHEET) > 1:
+        del FIXED_SPREADSHEET[1]
+    FIXED_SPREADSHEET.addSheet('Sheet1', index=0)
+    del FIXED_SPREADSHEET[tempName]
+
     checkIfSpreadsheetInOriginalState()
 
 
@@ -374,11 +384,102 @@ def test_str_sheet(init, checkPreAndPostCondition):
 
 
 def test_repr_sheet(init, checkPreAndPostCondition):
-    assert repr(FIXED_SPREADSHEET[0]) == "Sheet(sheetId=0, title='Sheet1', rowCount=1000, columnCount=26)"
+    assert repr(FIXED_SPREADSHEET[0]) == "Sheet(sheetId=%r, title='Sheet1', rowCount=1000, columnCount=26)" % (FIXED_SPREADSHEET[0].sheetId)
+
+
+def test_updateRows(init, checkPreAndPostCondition):
+    newSheet = FIXED_SPREADSHEET.addSheet(title='New Sheet 1', columnCount=5, rowCount=4)
+
+    newSheet.updateRows([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
+    assert newSheet.getRows() == [['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', ''], ['', '', '', '', '']]
+    assert newSheet.getRows(startRow=2) == [['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', ''], ['', '', '', '', '']]
+    assert newSheet.getRows(stopRow=4) == [['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', '']]
+    assert newSheet.getRows(startRow=2, stopRow=4) == [['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', '']]
+
+    newSheet.clear()
+    newSheet.updateRows([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']], startRow=2)
+    assert newSheet.getRows() == [['', '', '', '', ''], ['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', '']]
+    assert newSheet.getRows(startRow=2) == [['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', '']]
+    assert newSheet.getRows(stopRow=4) == [['', '', '', '', ''], ['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', '']]
+    assert newSheet.getRows(startRow=2, stopRow=4) == [['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', '']]
+
+    newSheet.clear()
+    newSheet.resize(columnCount=4, rowCount=5)
+
+    newSheet.updateRows([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
+    assert newSheet.getRows() == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', ''], ['', '', '', '']]
+    assert newSheet.getRows(startRow=2) == [['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', ''], ['', '', '', '']]
+    assert newSheet.getRows(stopRow=4) == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', '']]
+    assert newSheet.getRows(startRow=2, stopRow=4) == [['d', 'e', 'f', ''], ['g', 'h', 'i', '']]
+
+    newSheet.clear()
+    newSheet.updateRows([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']], startRow=2)
+    assert newSheet.getRows() == [['', '', '', ''], ['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', '']]
+    assert newSheet.getRows(startRow=2) == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', '']]
+    assert newSheet.getRows(stopRow=4) == [['', '', '', ''], ['a', 'b', 'c', ''], ['d', 'e', 'f', '']]
+    assert newSheet.getRows(startRow=2, stopRow=4) == [['a', 'b', 'c', ''], ['d', 'e', 'f', '']]
+
+    # Test invalid argumnets:
+    with pytest.raises(TypeError):
+        newSheet.getRows(startRow='invalid arg')
+    with pytest.raises(TypeError):
+        newSheet.getRows(stopRow='invalid arg')
+    with pytest.raises(ValueError):
+        newSheet.getRows(startRow=0)
+    with pytest.raises(ValueError):
+        newSheet.getRows(startRow=-9999)
+
+    newSheet.delete()
+
+
+
+def test_updateColumns(init, checkPreAndPostCondition):
+    newSheet = FIXED_SPREADSHEET.addSheet(title='New Sheet 1', columnCount=4, rowCount=5)
+
+    newSheet.updateColumns([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
+    assert newSheet.getColumns() == [['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', ''], ['', '', '', '', '']]
+    assert newSheet.getColumns(startColumn=2) == [['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', ''], ['', '', '', '', '']]
+    assert newSheet.getColumns(stopColumn=4) == [['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', '']]
+    assert newSheet.getColumns(startColumn=2, stopColumn=4) == [['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', '']]
+
+    newSheet.clear()
+    newSheet.updateColumns([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']], startColumn=2)
+    assert newSheet.getColumns() == [['', '', '', '', ''], ['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', '']]
+    assert newSheet.getColumns(startColumn=2) == [['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', ''], ['g', 'h', 'i', '', '']]
+    assert newSheet.getColumns(stopColumn=4) == [['', '', '', '', ''], ['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', '']]
+    assert newSheet.getColumns(startColumn=2, stopColumn=4) == [['a', 'b', 'c', '', ''], ['d', 'e', 'f', '', '']]
+
+    newSheet.clear()
+    newSheet.resize(columnCount=5, rowCount=4)
+
+    newSheet.updateColumns([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
+    assert newSheet.getColumns() == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', ''], ['', '', '', '']]
+    assert newSheet.getColumns(startColumn=2) == [['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', ''], ['', '', '', '']]
+    assert newSheet.getColumns(stopColumn=4) == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', '']]
+    assert newSheet.getColumns(startColumn=2, stopColumn=4) == [['d', 'e', 'f', ''], ['g', 'h', 'i', '']]
+
+    newSheet.clear()
+    newSheet.updateColumns([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']], startColumn=2)
+    assert newSheet.getColumns() == [['', '', '', ''], ['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', '']]
+    assert newSheet.getColumns(startColumn=2) == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', '']]
+    assert newSheet.getColumns(stopColumn=4) == [['', '', '', ''], ['a', 'b', 'c', ''], ['d', 'e', 'f', '']]
+    assert newSheet.getColumns(startColumn=2, stopColumn=4) == [['a', 'b', 'c', ''], ['d', 'e', 'f', '']]
+
+    # Test invalid argumnets:
+    with pytest.raises(TypeError):
+        newSheet.getColumns(startColumn='invalid arg')
+    with pytest.raises(TypeError):
+        newSheet.getColumns(startColumn='invalid arg')
+    with pytest.raises(ValueError):
+        newSheet.getColumns(startColumn=0)
+    with pytest.raises(ValueError):
+        newSheet.getColumns(startColumn=-9999)
+
+    newSheet.delete()
 
 
 def test_update_and_get(init, checkPreAndPostCondition):
-    newSheet = FIXED_SPREADSHEET.addSheet(title='New Sheet 1')
+    newSheet = FIXED_SPREADSHEET.addSheet(title='New Sheet 1', columnCount=4, rowCount=4)
 
     # Update a cell with column/row coordinates:
     newSheet.update(1, 1, 'new value')
@@ -390,19 +491,22 @@ def test_update_and_get(init, checkPreAndPostCondition):
 
     # Update a column:
     newSheet.updateColumn(1, ['a', 'b', 'c'])
-    assert newSheet.getColumn(1) == ['a', 'b', 'c']
+    assert newSheet.getColumn(1) == ['a', 'b', 'c', '']
 
     # Update a column:
     newSheet.updateColumn('C', ['x', 'y', 'z'])
-    assert newSheet.getColumn('C') == ['x', 'y', 'z']
+    assert newSheet.getColumn('C') == ['x', 'y', 'z', '']
 
     # Update a row:
     newSheet.updateRow(1, ['d', 'e', 'f'])
-    assert newSheet.getRow(1) == ['d', 'e', 'f']
+    assert newSheet.getRow(1) == ['d', 'e', 'f', '']
 
     # Update all:
-    newSheet.updateAll([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
-    assert newSheet.getAll() == [['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']]
+    newSheet.updateRows([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
+    assert newSheet.getRows() == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', '']]
+
+    newSheet.updateColumns([['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']])
+    assert newSheet.getColumns() == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', '']]
 
     # Get a cell that is outside the original range of the rowCount and columnCount
     assert newSheet.get(9999, 1) == ''
@@ -410,7 +514,6 @@ def test_update_and_get(init, checkPreAndPostCondition):
     assert newSheet.get(9999, 9999) == ''
 
     # TODO test enlarging the sheet with an update*() call.
-
 
     # Test with invalid coordinate.
     with pytest.raises(TypeError):
@@ -444,8 +547,121 @@ def test_update_and_get(init, checkPreAndPostCondition):
     with pytest.raises(IndexError):
         newSheet.update(1, -1, 'value') # Test with wrong argument type.
 
+    # Test getRow() and getColumn() with invalid arguments.
+    with pytest.raises(TypeError):
+        newSheet.getRow('invalid arg')
+    with pytest.raises(IndexError):
+        newSheet.getRow(0)
+    with pytest.raises(IndexError):
+        newSheet.getRow(-9999)
+    with pytest.raises(TypeError):
+        newSheet.getColumn({})
+    with pytest.raises(ValueError):
+        newSheet.getColumn('AAAAinvalid arg')
+    with pytest.raises(IndexError):
+        newSheet.getColumn(0)
+    with pytest.raises(IndexError):
+        newSheet.getColumn(-9999)
 
     newSheet.delete()
+
+
+def test_gridProperties_settersGetters(init, checkPreAndPostCondition):
+    # Test rowCount
+    # Test setters and getters:
+    FIXED_SPREADSHEET[0].rowCount = 10
+    assert FIXED_SPREADSHEET[0].rowCount == 10
+
+    # Test invalid arguments:
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].rowCount = 'invalid arg'
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].rowCount = 0
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].rowCount = -9999
+
+    # Test columnCount
+    # Test setters and getters:
+    FIXED_SPREADSHEET[0].columnCount = 10
+    assert FIXED_SPREADSHEET[0].columnCount == 10
+
+    # Test invalid arguments:
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].columnCount = 'invalid arg'
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].columnCount = 0
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].columnCount = -9999
+
+    # Test frozenRowCount
+    # Test setters and getters:
+    FIXED_SPREADSHEET[0].frozenRowCount = 1
+    assert FIXED_SPREADSHEET[0].frozenRowCount == 1
+
+    # Test invalid arguments:
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].frozenRowCount = 'invalid arg'
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].frozenRowCount = 0
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].frozenRowCount = -9999
+
+    # Test frozenColumnCount
+    # Test setters and getters:
+    FIXED_SPREADSHEET[0].frozenColumnCount = 1
+    assert FIXED_SPREADSHEET[0].frozenColumnCount == 1
+
+    # Test invalid arguments:
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].frozenColumnCount = 'invalid arg'
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].frozenColumnCount = 0
+    with pytest.raises(TypeError):
+        FIXED_SPREADSHEET[0].frozenColumnCount = -9999
+
+    # Test freezing all rows and columns
+    with pytest.raises(ValueError):
+        FIXED_SPREADSHEET[0].rowCount = 1
+    with pytest.raises(ValueError):
+        FIXED_SPREADSHEET[0].columnCount = 1
+    with pytest.raises(ValueError):
+        FIXED_SPREADSHEET[0].frozenRowCount = 10
+    with pytest.raises(ValueError):
+        FIXED_SPREADSHEET[0].frozenColumnCount = 10
+
+    # Test hideGridlines
+    FIXED_SPREADSHEET[0].hideGridlines = True
+    assert FIXED_SPREADSHEET[0].hideGridlines == True
+    FIXED_SPREADSHEET[0].hideGridlines = False
+    assert FIXED_SPREADSHEET[0].hideGridlines == False
+    FIXED_SPREADSHEET[0].hideGridlines = 'truthy value'
+    assert FIXED_SPREADSHEET[0].hideGridlines == True
+    FIXED_SPREADSHEET[0].hideGridlines = '' # Falsey value
+    assert FIXED_SPREADSHEET[0].hideGridlines == False
+
+    # Test rowGroupControlAfter
+    FIXED_SPREADSHEET[0].rowGroupControlAfter = True
+    assert FIXED_SPREADSHEET[0].rowGroupControlAfter == True
+    FIXED_SPREADSHEET[0].rowGroupControlAfter = False
+    assert FIXED_SPREADSHEET[0].rowGroupControlAfter == False
+    FIXED_SPREADSHEET[0].rowGroupControlAfter = 'truthy value'
+    assert FIXED_SPREADSHEET[0].rowGroupControlAfter == True
+    FIXED_SPREADSHEET[0].rowGroupControlAfter = '' # Falsey value
+    assert FIXED_SPREADSHEET[0].rowGroupControlAfter == False
+
+    # Test columnGroupControlAfter
+    FIXED_SPREADSHEET[0].columnGroupControlAfter = True
+    assert FIXED_SPREADSHEET[0].columnGroupControlAfter == True
+    FIXED_SPREADSHEET[0].columnGroupControlAfter = False
+    assert FIXED_SPREADSHEET[0].columnGroupControlAfter == False
+    FIXED_SPREADSHEET[0].columnGroupControlAfter = 'truthy value'
+    assert FIXED_SPREADSHEET[0].columnGroupControlAfter == True
+    FIXED_SPREADSHEET[0].columnGroupControlAfter = '' # Falsey value
+    assert FIXED_SPREADSHEET[0].columnGroupControlAfter == False
+
+
+def test_getitem(init, checkPreAndPostCondition):
+    pass # TODO LEFT OFF
 
 if __name__ == '__main__':
     pytest.main()
