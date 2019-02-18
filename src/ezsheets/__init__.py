@@ -14,7 +14,7 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE = None
 IS_INITIALIZED = False
 
-from ezsheets.colorvalues import COLORS
+# from ezsheets.colorvalues import COLORS
 
 """
 Features to add:
@@ -42,7 +42,9 @@ class Spreadsheet():
     def refresh(self):
         request = SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId)
         response = request.execute()
-
+		
+        
+		
         """
         Example of a response object here:
         {'properties': {'autoRecalc': 'ON_CHANGE',
@@ -86,25 +88,36 @@ class Spreadsheet():
         self._title = response['properties']['title']
 
         # TODO!!!!!!!! Every time we call refresh, we're recreating the Sheet objects. BAD!!!!
-
-        self.sheets = []
-        for i, sheetInfo in enumerate(response['sheets']):
-            sheetId = sheetInfo['properties']['sheetId']
-            gp = sheetInfo['properties']['gridProperties'] # syntactic sugar
-            additionalArgs = {'title':                   sheetInfo['properties']['title'],
-                              'index':                   i,
-                              'tabColor':                gp.get('tabColor'),
-                              'rowCount':                gp.get('rowCount'),
-                              'columnCount':             gp.get('columnCount'),
-                              'frozenRowCount':          gp.get('frozenRowCount'),
-                              'frozenColumnCount':       gp.get('frozenColumnCount'),
-                              'hideGridlines':           gp.get('hideGridlines'),
-                              'rowGroupControlAfter':    gp.get('rowGroupControlAfter'),
-                              'columnGroupControlAfter': gp.get('columnGroupControlAfter'),}
-            sheet = Sheet(self, sheetId, **additionalArgs)
-            self.sheets.append(sheet)
-        self.sheets = tuple(self.sheets) # Make sheets attribute an immutable tuple.
-        self._dataIsFresh = True
+        if hasattr(self, 'sheets'):
+            print("has sheets, updating them")
+            # sheets is initialized, so this is not a first time refresh
+            if len(response['sheets']) != len(self.sheets):
+                for i, sheetInfo in enumerate(response['sheets']):
+                    print(sheetInfo)
+                print("A sheet was either added or deleted")
+            
+            print("Check data of sheets to make sure it's fresh")
+        else:
+            # sheets is not initialized yet, meaning this is a first time refresh.
+            self.sheets = []
+            print("After refresh", self.sheets)
+            for i, sheetInfo in enumerate(response['sheets']):
+                sheetId = sheetInfo['properties']['sheetId']
+                gp = sheetInfo['properties']['gridProperties'] # syntactic sugar
+                additionalArgs = {'title':                   sheetInfo['properties']['title'],
+                                  'index':                   i,
+                                  'tabColor':                gp.get('tabColor'),
+                                  'rowCount':                gp.get('rowCount'),
+                                  'columnCount':             gp.get('columnCount'),
+                                  'frozenRowCount':          gp.get('frozenRowCount'),
+                                  'frozenColumnCount':       gp.get('frozenColumnCount'),
+                                  'hideGridlines':           gp.get('hideGridlines'),
+                                  'rowGroupControlAfter':    gp.get('rowGroupControlAfter'),
+                                  'columnGroupControlAfter': gp.get('columnGroupControlAfter'),}
+                sheet = Sheet(self, sheetId, **additionalArgs)
+                self.sheets.append(sheet)
+            self.sheets = tuple(self.sheets) # Make sheets attribute an immutable tuple.
+            self._dataIsFresh = True
 
     @property
     def spreadsheetId(self):
