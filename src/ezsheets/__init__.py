@@ -183,7 +183,9 @@ class Spreadsheet():
 
     def __len__(self):
         """
-        TODO
+        returns the number of sheets in the spreadsheet object.
+        
+        :returns: int - length of self.sheets
         """
         return len(self.sheets)
 
@@ -196,20 +198,28 @@ class Spreadsheet():
     @property
     def spreadsheetId(self):
         """
-        TODO
+        returns the `spreadsheetId` of the Spreadsheet object.
+        
+        :returns: int - google spreadsheetId of the spreadsheet object.
         """
         return self._spreadsheetId
 
     @property
     def sheetTitles(self):
         """
-        TODO
+        returns the titles of all the sheets in the Spreadsheet object.
+        
+        :returns: tuple of strings - All the sheet titles in the Spreadsheet 
+        Object.
         """
         return tuple([sheet.title for sheet in self.sheets])
 
     def __str__(self):
         """
-        TODO
+        returns a string representation of the Spreadsheet object, it does not
+        return information about the underlying sheet objects.
+        
+        :returns: String - name, title, and number of sheets
         """
         return '<%s title="%s", %d sheets>' % (type(self).__name__, self.title, len(self.sheets))
 
@@ -222,7 +232,9 @@ class Spreadsheet():
     @property
     def title(self):
         """
-        TODO
+        returns the title of the Spreadsheet object.
+        
+        :returns: String - title of the Spreadsheet object
         """
         return self._title
 
@@ -276,14 +288,18 @@ class Sheet():
     @property
     def spreadsheet(self):
         """
-        TODO
+            Returns a reference to the Spreadsheet object this sheet belongs to
+            
+            :returns: Object - Spreadsheet Object
         """
         return self._spreadsheet
 
     @property
     def title(self):
         """
-        TODO
+            Returns the title of the sheet
+            
+            :returns: String - title of the sheet
         """
         return self._title
 
