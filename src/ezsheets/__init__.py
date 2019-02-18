@@ -106,18 +106,21 @@ class Spreadsheet():
         response = request.execute(); _logReadRequests()
 
         self._title = response['properties']['title']
+        
+        sheetIDS = {}
+        for i, sh in enumerate(self.sheets):
+            sheetIDS[sh.sheetId] = i
 
         # Update/create Sheet objects:
         replacementSheetsAttr = [] # We will replace self.sheets with this list.
         for i, sheetInfo in enumerate(response['sheets']):
             sheetId = sheetInfo['properties']['sheetId']
 
-            # Find the index of the sheet if it already exists in `self.sheets`
-            try:
-                existingSheetIndex = [sh.sheetId for sh in self.sheets].index(sheetId)
-            except ValueError:
+            if sheetId in sheetIDS:
+                existingSheetIndex = sheetIDS[sheetId]
+            else:
                 existingSheetIndex = None
-
+            
             if existingSheetIndex is not None:
                 # If the sheet has been previously loaded, reuse that Sheet object:
                 replacementSheetsAttr.append(self.sheets[existingSheetIndex])
@@ -127,6 +130,7 @@ class Spreadsheet():
                 # If the sheet hasn't been seen before, create a new Sheet object:
                 replacementSheetsAttr.append(Sheet(self, sheetId)) # TODO - would be nice to reuse the info in `response` for this instead of letting the ctor make another request, but this isn't that important.
 
+        del sheetIDS
         self.sheets = tuple(replacementSheetsAttr) # Make sheets attribute an immutable tuple.
 
 
@@ -1179,3 +1183,4 @@ def init(credentialsFile='credentials.json', tokenFile='token.pickle'):
 
 init()
 s = Spreadsheet('https://docs.google.com/spreadsheets/d/1GfFDkD7LfwlVSLQMVQILaz2BPARG7Ott5Ui-frh0m2Y/edit#gid=0')
+# m = Spreadsheet('https://docs.google.com/spreadsheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0') # (My spreadsheet since I don't have access to yours)
