@@ -1,20 +1,34 @@
 # EZSheets
 # By Al Sweigart al@inventwithpython.com
 
+# IMPORTANT NOTE: This module has not been stress-tested for performance
+# and should not be considered "thread-safe" if multiple users are
+
 import pickle, copy, re
 import os.path
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 #SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE = None
 IS_INITIALIZED = False
 
-# from ezsheets.colorvalues import COLORS
+DEFAULT_NEW_ROW_COUNT = 1000  # This is the Google Sheets default for a new Sheet.
+DEFAULT_NEW_COLUMN_COUNT = 26 # This is the Google Sheets default for a new Sheet.
+DEFAULT_FROZEN_ROW_COUNT = 0
+DEFAULT_FROZEN_COLUMN_COUNT = 0
+DEFAULT_HIDE_GRID_LINES = False
+DEFAULT_ROW_GROUP_CONTROL_AFTER = False
+DEFAULT_COLUMN_GROUP_CONTROL_AFTER = False
+
+from ezsheets.colorvalues import COLORS
+
+_READ_REQUESTS = 0
+_WRITE_REQUESTS = 0
 
 """
 Features to add:
@@ -34,90 +48,86 @@ class Spreadsheet():
     def __init__(self, spreadsheetId):
         if not IS_INITIALIZED: init() # Initialize this module if not done so already.
 
-        self._dataIsFresh = False
-
         self._spreadsheetId = getIdFromUrl(spreadsheetId)
+        self.sheets = ()
         self.refresh()
 
     def refresh(self):
-        request = SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId)
+        global _READ_REQUESTS
+        request = SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId); _READ_REQUESTS += 1
         response = request.execute()
-		
-        
-		
-        """
-        Example of a response object here:
-        {'properties': {'autoRecalc': 'ON_CHANGE',
-                        'defaultFormat': {'backgroundColor': {'blue': 1,
-                                                              'green': 1,
-                                                              'red': 1},
-                                          'padding': {'bottom': 2,
-                                                      'left': 3,
-                                                      'right': 3,
-                                                      'top': 2},
-                                          'textFormat': {'bold': False,
-                                                         'fontFamily': 'arial,sans,sans-serif',
-                                                         'fontSize': 10,
-                                                         'foregroundColor': {},
-                                                         'italic': False,
-                                                         'strikethrough': False,
-                                                         'underline': False},
-                                          'verticalAlignment': 'BOTTOM',
-                                          'wrapStrategy': 'LEGACY_WRAP'},
-                        'locale': 'en_US',
-                        'timeZone': 'America/New_York',
-                        'title': 'Copy of Example Spreadsheet'},
-         'sheets': [{'properties': {'gridProperties': {'columnCount': 22,
-                                                       'frozenRowCount': 1,
-                                                       'rowCount': 101},
-                                    'index': 0,
-                                    'sheetId': 0,
-                                    'sheetType': 'GRID',
-                                    'title': 'Class Data'}},
-                    {'properties': {'gridProperties': {'columnCount': 26,
-                                                       'rowCount': 1000},
-                                    'index': 1,
-                                    'sheetId': 2075929783,
-                                    'sheetType': 'GRID',
-                                    'title': 'Sheet1'}}],
-         'spreadsheetId': '16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c',
-         'spreadsheetUrl': 'https://docs.google.com/spreadsheets/d/16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c/edit'}
-         """
-        #self.locale = response['properties']['locale'] # Leave these commented until it's clear I actually need them.
-        #self.timeZone = response['properties']['timeZone']
+
         self._title = response['properties']['title']
 
-        # TODO!!!!!!!! Every time we call refresh, we're recreating the Sheet objects. BAD!!!!
-        if hasattr(self, 'sheets'):
-            print("has sheets, updating them")
-            # sheets is initialized, so this is not a first time refresh
-            if len(response['sheets']) != len(self.sheets):
-                for i, sheetInfo in enumerate(response['sheets']):
-                    print(sheetInfo)
-                print("A sheet was either added or deleted")
-            
-            print("Check data of sheets to make sure it's fresh")
+        # Update/create Sheet objects:
+        replacementSheetsAttr = [] # We will replace self.sheets with this list.
+        for i, sheetInfo in enumerate(response['sheets']):
+            sheetId = sheetInfo['properties']['sheetId']
+
+            # Find the index of the sheet if it already exists in `self.sheets`
+            try:
+                existingSheetIndex = [sh.sheetId for sh in self.sheets].index(sheetId)
+            except ValueError:
+                existingSheetIndex = None
+
+            if existingSheetIndex is not None:
+                # If the sheet has been previously loaded, reuse that Sheet object:
+                replacementSheetsAttr.append(self.sheets[existingSheetIndex])
+                self.sheets[existingSheetIndex]._refreshPropertiesWithSheetPropertiesDict(sheetInfo['properties'])
+                self.sheets[existingSheetIndex]._refreshData()
+            else:
+                # If the sheet hasn't been seen before, create a new Sheet object:
+                replacementSheetsAttr.append(Sheet(self, sheetId)) # TODO - would be nice to reuse the info in `response` for this instead of letting the ctor make another request, but this isn't that important.
+
+        self.sheets = tuple(replacementSheetsAttr) # Make sheets attribute an immutable tuple.
+
+
+    def __getitem__(self, key):
+        try:
+            i = self.sheetTitles.index(key)
+            return self.sheets[i]
+        except ValueError:
+            pass # Do nothing if the title isn't found.
+
+
+        if isinstance(key, int) and (-len(self.sheets) <= key < len(self.sheets)):
+            return self.sheets[key]
+        if isinstance(key, slice):
+            return self.sheets[key]
+
+        raise KeyError('key must be an int between %s and %s or a str matching a title: %r' % (-(len(self.sheets)), len(self.sheets) - 1, self.sheetTitles))
+
+    def __delitem__(self, key):
+        if isinstance(key, (int, str)):
+            # Key is an int index or a str title.
+            self[key].delete()
+        elif isinstance(key, slice):
+            # TODO - there's got to be a better way to do this.
+            start = key.start if key.start is not None else 0
+            stop  = key.stop  if key.stop  is not None else len(self.sheets)
+            step  = key.step  if key.step  is not None else 1
+
+            if start < 0 or stop < 0:
+                return # When deleting list items with a slice, a negative start or stop results in a no-op. I'll mimic that behavior here.
+
+            indexesToDelete = [i for i in range(start, stop, step) if i >= 0 and i < len(self.sheets)] # Don't include invalid or negative indexes.
+            if len(indexesToDelete) == len(self.sheets):
+                raise ValueError('Cannot delete all sheets; spreadsheets must have at least one sheet')
+
+            if indexesToDelete[0] < indexesToDelete[-1]:
+                indexesToDelete.reverse() # We want this is descending order.
+
+            for i in indexesToDelete:
+                self.sheets[i].delete()
+
         else:
-            # sheets is not initialized yet, meaning this is a first time refresh.
-            self.sheets = []
-            print("After refresh", self.sheets)
-            for i, sheetInfo in enumerate(response['sheets']):
-                sheetId = sheetInfo['properties']['sheetId']
-                gp = sheetInfo['properties']['gridProperties'] # syntactic sugar
-                additionalArgs = {'title':                   sheetInfo['properties']['title'],
-                                  'index':                   i,
-                                  'tabColor':                gp.get('tabColor'),
-                                  'rowCount':                gp.get('rowCount'),
-                                  'columnCount':             gp.get('columnCount'),
-                                  'frozenRowCount':          gp.get('frozenRowCount'),
-                                  'frozenColumnCount':       gp.get('frozenColumnCount'),
-                                  'hideGridlines':           gp.get('hideGridlines'),
-                                  'rowGroupControlAfter':    gp.get('rowGroupControlAfter'),
-                                  'columnGroupControlAfter': gp.get('columnGroupControlAfter'),}
-                sheet = Sheet(self, sheetId, **additionalArgs)
-                self.sheets.append(sheet)
-            self.sheets = tuple(self.sheets) # Make sheets attribute an immutable tuple.
-            self._dataIsFresh = True
+            raise TypeError('key must be an int index, str sheet title, or slice object, not %r' % (type(key).__name__))
+
+    def __len__(self):
+        return len(self.sheets)
+
+    def __iter__(self):
+        return iter(self.sheets)
 
     @property
     def spreadsheetId(self):
@@ -128,10 +138,10 @@ class Spreadsheet():
         return tuple([sheet.title for sheet in self.sheets])
 
     def __str__(self):
-        return '<%s title="%d", %s sheets>' % (type(self).__name__, self.title, len(self.sheets))
+        return '<%s title="%s", %d sheets>' % (type(self).__name__, self.title, len(self.sheets))
 
     def __repr__(self):
-        return '%s(spreadsheetId=%s)' % (type(self).__name__, self.spreadsheetId)
+        return '%s(spreadsheetId=%r)' % (type(self).__name__, self.spreadsheetId)
 
     @property
     def title(self):
@@ -139,68 +149,40 @@ class Spreadsheet():
 
     @title.setter
     def title(self, value):
+        global _WRITE_REQUESTS
         value = str(value)
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
         body={
             'requests': [{'updateSpreadsheetProperties': {'properties': {'title': value},
-                                                          'fields': 'title'}}],
-            'includeSpreadsheetInResponse': False,
-            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
-            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
-        })
+                                                          'fields': 'title'}}]}); _WRITE_REQUESTS += 1
         request.execute()
         self._title = value
 
 
-    def addSheet(self, title='', rowCount=100, columnCount=12, index=None, tabColor=None):
-        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
-            self.refresh()
-
+    def addSheet(self, title='', index=None):
+        global _WRITE_REQUESTS
         if index is None:
             # Set the index to make this new sheet be the last sheet:
             index = len(self.sheets)
 
-        propertiesDictValue = {'title': title,
-                               'index': index,
-                               'gridProperties' : {'rowCount': rowCount,
-                                                   'columnCount': columnCount}}
-        if tabColor is not None:
-            propertiesDictValue['tabColor'] = _getTabColorArg(tabColor)
-
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
         body={
-            'requests': [{'addSheet': {'properties': propertiesDictValue}}],
-            'includeSpreadsheetInResponse': False,
-            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
-            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
-        })
+            'requests': [{'addSheet': {'properties': {'title': title, 'index': index}}}]}); _WRITE_REQUESTS += 1
         request.execute()
 
         self.refresh()
-        return self._spreadsheet.sheets[index]
+        return self.sheets[index]
 
 
 
 class Sheet():
-    def __init__(self, spreadsheet, sheetId, **kwargs):
+    def __init__(self, spreadsheet, sheetId):
         #if not IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
 
+        # Set the properties of this sheet
         self._spreadsheet = spreadsheet
         self._sheetId = sheetId
-        self._title                   = kwargs.get('title')
-        self._index                   = kwargs.get('index')
-        self._rowCount                = kwargs.get('rowCount')
-        self._columnCount             = kwargs.get('columnCount')
-        self._frozenRowCount          = kwargs.get('frozenRowCount')
-        self._frozenColumnCount       = kwargs.get('frozenColumnCount')
-        self._hideGridlines           = kwargs.get('hideGridlines')
-        self._rowGroupControlAfter    = kwargs.get('rowGroupControlAfter')
-        self._columnGroupControlAfter = kwargs.get('columnGroupControlAfter')
-
-        self._tabColor = kwargs.get('tabColor') # LEFT OFF
-
-        self._dataIsFresh = False
-        self._data = None
+        self.refresh()
 
     # Set up the read-only attributes.
     @property
@@ -213,16 +195,13 @@ class Sheet():
 
     @title.setter
     def title(self, value):
+        global _WRITE_REQUESTS
         value = str(value)
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'title': value},
-                                                    'fields': 'title'}}],
-            'includeSpreadsheetInResponse': False,
-            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
-            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
-        })
+                                                    'fields': 'title'}}]}); _WRITE_REQUESTS += 1
         request.execute()
         self._title = value
 
@@ -233,17 +212,14 @@ class Sheet():
 
     @tabColor.setter
     def tabColor(self, value):
-        tabColorArg = self._getTabColorArg(value)
+        global _WRITE_REQUESTS
+        tabColorArg = _getTabColorArg(value)
 
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'tabColor': tabColorArg},
-                                                    'fields': 'tabColor'}}],
-            'includeSpreadsheetInResponse': False,
-            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
-            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
-        })
+                                                    'fields': 'tabColor'}}]}); _WRITE_REQUESTS += 1
         request.execute()
         self._tabColor = tabColorArg
 
@@ -255,75 +231,163 @@ class Sheet():
 
     @index.setter
     def index(self, value):
+        global _WRITE_REQUESTS
+        if value == self._index:
+            return # No change needed.
+
         if not isinstance(value, int):
             raise TypeError('indices must be integers, not %s' % (type(value).__name__))
-        if value < 0:
-            raise ValueError('indices are 0-based, and must be 0 or greater, not %r' % (value))
 
-        if value == self.index:
-            return # No change needed.
-        if value > self.index:
+        if value < 0: # Handle negative indexes the way Python lists do.
+            if value < -len(self.spreadsheet.sheets):
+                raise IndexError('%r is out of range (-1 to %d)' % (value, -len(self.spreadsheet.sheets)))
+            value = len(self.spreadsheet.sheets) + value # convert this negative index into its corresponding positive index
+        if value >= len(self.spreadsheet.sheets):
+            raise IndexError('%r is out of range (0 to %d)' % (value, len(self.spreadsheet.sheets) - 1))
+
+        # Update the index:
+        if value > self._index:
             value += 1 # Google Sheets uses "before the move" indexes, which is confusing and I don't want to do it here.
 
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'index': value},
-                                                    'fields': 'index'}}],
-            'includeSpreadsheetInResponse': False,
-            'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
-            'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
-        })
+                                                    'fields': 'index'}}]}); _WRITE_REQUESTS += 1
         request.execute()
-        self._spreadsheet.refresh() # Update the spreadsheet's tuple of Sheet objects to reflect the new order.
 
+        self._spreadsheet.refresh() # Update the spreadsheet's tuple of Sheet objects to reflect the new order.
+        #self._index = self._spreadsheet.sheets.index(self) # Update the local Sheet object's index.
+
+
+    def __eq__(self, other):
+        if not isinstance(other, Sheet):
+            return False
+        return self._sheetId == other._sheetId
 
     @property
     def sheetId(self):
         return self._sheetId
+
+
     @property
     def rowCount(self):
         return self._rowCount
+
+    @rowCount.setter
+    def rowCount(self, value):
+        # Validate arguments:
+        if not isinstance(value, int):
+            raise TypeError('value arg must be an int, not %s' % (type(value).__name__))
+        if value < 1:
+            raise TypeError('value arg must be a positive nonzero int, not %r' % (value))
+
+        self.refresh() # Retrieve up-to-date grid properties from Google Sheets.
+        self._rowCount = value        # Change local grid property.
+        self._updateGridProperties()  # Upload grid properties to Google Sheets.
+
+
     @property
     def columnCount(self):
         return self._columnCount
+
+
+    @columnCount.setter
+    def columnCount(self, value):
+        # Validate arguments:
+        if not isinstance(value, int):
+            raise TypeError('value arg must be an int, not %s' % (type(value).__name__))
+        if value < 1:
+            raise TypeError('value arg must be a positive nonzero int, not %r' % (value))
+
+        self.refresh() # Retrieve up-to-date grid properties from Google Sheets.
+        self._columnCount = value     # Change local grid property.
+        self._updateGridProperties()  # Upload grid properties to Google Sheets.
+
+
     @property
     def frozenRowCount(self):
         return self._frozenRowCount
+
+
+    @frozenRowCount.setter
+    def frozenRowCount(self, value):
+        # Validate arguments:
+        if not isinstance(value, int):
+            raise TypeError('value arg must be an int, not %s' % (type(value).__name__))
+        if value < 1:
+            raise TypeError('value arg must be a positive nonzero int, not %r' % (value))
+
+        self.refresh() # Retrieve up-to-date grid properties from Google Sheets.
+        self._frozenRowCount = value  # Change local grid property.
+        self._updateGridProperties()  # Upload grid properties to Google Sheets.
+
+
     @property
     def frozenColumnCount(self):
         return self._frozenColumnCount
+
+
+    @frozenColumnCount.setter
+    def frozenColumnCount(self, value):
+        # Validate arguments:
+        if not isinstance(value, int):
+            raise TypeError('value arg must be an int, not %s' % (type(value).__name__))
+        if value < 1:
+            raise TypeError('value arg must be a positive nonzero int, not %r' % (value))
+
+        self.refresh() # Retrieve up-to-date grid properties from Google Sheets.
+        self._frozenRowCount = value  # Change local grid property.
+        self._updateGridProperties()  # Upload grid properties to Google Sheets.
+
+
     @property
     def hideGridlines(self):
         return self._hideGridlines
+
+
+    @hideGridlines.setter
+    def hideGridlines(self, value):
+        value = bool(value)
+
+        self.refresh() # Retrieve up-to-date grid properties from Google Sheets.
+        self._hideGridlines = value   # Change local grid property.
+        self._updateGridProperties()  # Upload grid properties to Google Sheets.
+
     @property
     def rowGroupControlAfter(self):
         return self._rowGroupControlAfter
+
+
+    @rowGroupControlAfter.setter
+    def rowGroupControlAfter(self, value):
+        value = bool(value)
+
+        self.refresh() # Retrieve up-to-date grid properties from Google Sheets.
+        self._rowGroupControlAfter = value # Change local grid property.
+        self._updateGridProperties()  # Upload grid properties to Google Sheets.
+
+
     @property
     def columnGroupControlAfter(self):
         return self._columnGroupControlAfter
 
+
+    @columnGroupControlAfter.setter
+    def columnGroupControlAfter(self, value):
+        value = bool(value)
+
+        self.refresh() # Retrieve up-to-date grid properties from Google Sheets.
+        self._columnGroupControlAfter = value # Change local grid property.
+        self._updateGridProperties()  # Upload grid properties to Google Sheets.
+
+
     def __str__(self):
         return '<%s title=%r, sheetId=%r, rowCount=%r, columnCount=%r>' % (type(self).__name__, self._title, self._sheetId, self._rowCount, self._columnCount)
 
-    def __repr__(self):
-        args = ['title=%r' % (self.title), 'sheetId=%r' % (self.sheetId)]
-        if self._rowCount is not None:
-            args.append('rowCount=%r' % (self._rowCount))
-        if self._columnCount is not None:
-            args.append('columnCount=%r' % (self._columnCount))
-        if self._frozenRowCount is not None:
-            args.append('frozenRowCount=%r' % (self._frozenRowCount))
-        if self._frozenColumnCount is not None:
-            args.append('frozenColumnCount=%r' % (self._frozenColumnCount))
-        if self._hideGridlines is not None:
-            args.append('hideGridlines=%r' % (self._hideGridlines))
-        if self._rowGroupControlAfter is not None:
-            args.append('rowGroupControlAfter=%r' % (self._rowGroupControlAfter))
-        if self._columnGroupControlAfter is not None:
-            args.append('columnGroupControlAfter=%r' % (self._columnGroupControlAfter))
 
-        return '%s(%s)' % (type(self).__name__, ', '.join(args))
+    def __repr__(self):
+        return '%s(sheetId=%r, title=%r, rowCount=%r, columnCount=%r)' % (type(self).__name__, self.sheetId, self._title, self._rowCount, self._columnCount)
 
 
     def get(self, *args):
@@ -342,9 +406,6 @@ class Sheet():
         if column < 1 or row < 1:
             raise IndexError('Column %s, row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index. Negative indices are not supported by ezsheets.' % (column, row))
 
-        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
-            self.refresh()
-
         try:
             if self._majorDimension == 'ROWS':
                 return self._cells[row-1][column-1] # -1 because _cells is 0-based while Google Sheets is 1-based.
@@ -355,9 +416,6 @@ class Sheet():
 
 
     def getAll(self):
-        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
-            self.refresh()
-
         if self._majorDimension == 'ROWS':
             return copy.deepcopy(self._cells)
         elif self._majorDimension == 'COLUMNS':
@@ -385,9 +443,6 @@ class Sheet():
         if row < 1:
             raise IndexError('Row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index.' % (row))
 
-        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
-            self.refresh()
-
         if self._majorDimension == 'ROWS':
             try:
                 return self._cells[row-1] # -1 because _cells is 0-based while Google Sheets is 1-based.
@@ -403,6 +458,25 @@ class Sheet():
             return rowList
 
 
+    def getRows(self, startRow=0, stopRow=None, step=1):
+        if stopRow is None:
+            stopRow = self._rowCount + 1
+
+        return [self.getRow(rowNum) for rowNum in range(startRow, stopRow,  step)]
+
+
+    def __getitem__(self, key):
+        if isinstance(key, int) and (-len(self.sheets) <= key < len(self.sheets)):
+            return self.sheets[key]
+        if isinstance(key, slice):
+            start = key.start if key.start is not None else 0
+            stop =  key.stop # if key.stop is None, then pass it anyways. It's fine.
+            step = key.step if key.step is not None else 1
+            return self.getRows(startRow=start, stopRow=stop, step=step)
+
+        raise KeyError('key must be an int between %s and %s or a str matching a title: %r' % (-(len(self.sheets)), len(self.sheets) - 1, self.sheetTitles))
+
+
     def getColumn(self, column):
         if not isinstance(column, (int, str)):
             raise TypeError('column indices must be integers or str, not %s' % (type(column).__name__))
@@ -413,9 +487,6 @@ class Sheet():
 
         if isinstance(column, str):
             column = getColumnNumber(column)
-
-        if not self._dataIsFresh: # Download the sheet, if it hasn't been downloaded already.
-            self.refresh()
 
         if self._majorDimension == 'COLUMNS':
             try:
@@ -433,21 +504,86 @@ class Sheet():
 
 
     def refresh(self):
-        request = SERVICE.spreadsheets().values().get(
-            spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount))
-        response = request.execute()
+        self._refreshProperties()
+        self._refreshData()
 
-        self._cells = response['values']
+
+    def _refreshProperties(self):
+        global _READ_REQUESTS
+        # Get all the sheet properties:
+        response = SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheet._spreadsheetId).execute(); _READ_REQUESTS += 1
+
+        for sheetDict in response['sheets']:
+            if sheetDict['properties']['sheetId'] == self._sheetId: # Find this sheet in the returned spreadsheet json data.
+                self._refreshPropertiesWithSheetPropertiesDict(sheetDict['properties'])
+
+
+    def _refreshPropertiesWithSheetPropertiesDict(self, sheetPropsDict):
+        self._title = sheetPropsDict['title']
+        self._index = sheetPropsDict['index']
+        self._tabColor = _getTabColorArg(sheetPropsDict.get('tabColor')) # Set to None if there is no tabColor.
+
+        # These attrs we don't have properties for yet, I'm not sure if we'll keep them:
+        self._sheetType   = sheetPropsDict.get('sheetType')
+        self._hidden      = sheetPropsDict.get('hidden')
+        self._rightToLeft = sheetPropsDict.get('rightToLeft')
+
+        gridProps = sheetPropsDict['gridProperties']
+        self._rowCount                = gridProps.get('rowCount', DEFAULT_NEW_ROW_COUNT)
+        self._columnCount             = gridProps.get('columnCount', DEFAULT_NEW_COLUMN_COUNT)
+        self._frozenRowCount          = gridProps.get('frozenRowCount', DEFAULT_FROZEN_ROW_COUNT)
+        self._frozenColumnCount       = gridProps.get('frozenColumnCount', DEFAULT_FROZEN_COLUMN_COUNT)
+        self._hideGridlines           = gridProps.get('hideGridlines', DEFAULT_HIDE_GRID_LINES)
+        self._rowGroupControlAfter    = gridProps.get('rowGroupControlAfter', DEFAULT_ROW_GROUP_CONTROL_AFTER)
+        self._columnGroupControlAfter = gridProps.get('columnGroupControlAfter', DEFAULT_COLUMN_GROUP_CONTROL_AFTER)
+
+
+    def _refreshData(self):
+        global _READ_REQUESTS, _WRITE_REQUESTS
+
+        # Get all the sheet data:
+        response = SERVICE.spreadsheets().values().get(
+            spreadsheetId=self._spreadsheet._spreadsheetId,
+            range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount)).execute(); _READ_REQUESTS += 1
+        self._cells = response.get('values', [[]])
         self._majorDimension = response['majorDimension']
 
-        self._dataIsFresh = True
 
+    def _updateGridProperties(self):
+        global _WRITE_REQUESTS
+        gridProperties = {'rowCount':                self._rowCount,
+                          'columnCount':             self._columnCount,
+                          'frozenRowCount':          self._frozenRowCount,
+                          'frozenColumnCount':       self._frozenColumnCount,
+                          'hideGridlines':           self._hideGridlines,
+                          'rowGroupControlAfter':    self._rowGroupControlAfter,
+                          'columnGroupControlAfter': self._columnGroupControlAfter}
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+            body={
+            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+                                                                   'gridProperties': gridProperties},
+                                                    'fields': 'gridProperties'}}]}); _WRITE_REQUESTS += 1
+        request.execute()
+
+
+    def _enlargeIfNeeded(self, requestedColumn=None, requestedRow=None):
+        # Increase rowCount or columnCount if needed.
+        if requestedColumn is None:
+            requestedColumn = self._columnCount
+        if requestedRow is None:
+            requestedRow = self._rowCount
+
+        # Enlarge the sheet:
+        self.resize(max(requestedColumn, self._columnCount),
+                    max(requestedRow, self._rowCount))
 
     def update(self, *args):
+        global _WRITE_REQUESTS
         if len(args) == 3: # args are column, row like (2, 5)
             column, row, value = args
         elif len(args) == 2: # args is a string of a grid cell like ('B5',)
+            if isinstance(args[0], int) and isinstance(args[1], int):
+                raise TypeError('You most likely have forgotten to supply a value to update the this cell with.')
             column, row = convertToColumnRowInts(args[0])
             value = args[1]
         else:
@@ -460,6 +596,8 @@ class Sheet():
         if column < 1 or row < 1:
             raise IndexError('Column %s, row %s does not exist. Google Sheets\' columns and rows are 1-based, not 0-based. Use index 1 instead of index 0 for row and column index. Negative indices are not supported by ezsheets.' % (column, row))
 
+        self._enlargeIfNeeded(column, row)
+
         cellLocation = getColumnLetterOf(column) + str(row)
         request = SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
@@ -470,13 +608,13 @@ class Sheet():
                 'values': [[value]],
                 'range': '%s!%s:%s' % (self._title, cellLocation, cellLocation),
                 }
-            )
+            ); _WRITE_REQUESTS += 1
         request.execute()
 
-        self._dataIsFresh = False
 
 
     def updateRow(self, row, values):
+        global _WRITE_REQUESTS
         if not isinstance(row, int):
             raise TypeError('row indices must be integers, not %s' % (type(row).__name__))
         if row < 1:
@@ -489,6 +627,8 @@ class Sheet():
         if len(values) < self._columnCount:
             values.extend([''] * (self._columnCount - len(values)))
 
+        self._enlargeIfNeeded(None, row)
+
         request = SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
@@ -498,13 +638,12 @@ class Sheet():
                 'values': [values],
                 'range': '%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
                 }
-            )
+            ); _WRITE_REQUESTS += 1
         request.execute()
-
-        self._dataIsFresh = False
 
 
     def updateColumn(self, column, values):
+        global _WRITE_REQUESTS
         if not isinstance(column, (int, str)):
             raise TypeError('column indices must be integers, not %s' % (type(column).__name__))
         if isinstance(column, int) and column < 1:
@@ -522,6 +661,8 @@ class Sheet():
         if len(values) < self._rowCount:
             values.extend([''] * (self._rowCount - len(values)))
 
+        self._enlargeIfNeeded(column, None)
+
         request = SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
@@ -531,12 +672,12 @@ class Sheet():
                 'values': [values],
                 'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
                 }
-            )
+            ); _WRITE_REQUESTS += 1
         request.execute()
 
-        self._dataIsFresh = False
 
     def updateAll(self, values):
+        global _WRITE_REQUESTS
         # Ensure that `values` is a list of lists:
         if not isinstance(values, list):
             if isinstance(values, tuple):
@@ -577,6 +718,8 @@ class Sheet():
         else:
             assert False, 'self._majorDimension is set to %r instead of "ROWS" or "COLUMNS"' % (self._majorDimension)
 
+        self._enlargeIfNeeded(len(values[0]), len(values))
+
         # Send the API request that updates the Google sheet.
         request = SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
@@ -587,31 +730,86 @@ class Sheet():
                 'values': values,
                 'range': '%s!A1:%s%s' % (self._title, getColumnLetterOf(len(values[0])), len(values)),
                 }
-            )
-        response = request.execute()
-        print(response)
-
-        self._dataIsFresh = False
+            ); _WRITE_REQUESTS += 1
+        request.execute()
 
 
     def copyTo(self, destinationSpreadsheetId):
+        global _WRITE_REQUESTS
         request = SERVICE.spreadsheets().sheets().copyTo(spreadsheetId=self._spreadsheet._spreadsheetId,
                                                          sheetId=self._sheetId,
-                                                         body={'destinationSpreadsheetId': destinationSpreadsheetId})
+                                                         body={'destinationSpreadsheetId': destinationSpreadsheetId}); _WRITE_REQUESTS += 1
         request.execute()
+
 
     def delete(self):
+        global _WRITE_REQUESTS
+        if len(self._spreadsheet.sheets) == 1:
+            raise ValueError('Cannot delete all sheets; spreadsheets must have at least one sheet')
+
         request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
             body={
-                'requests': [{'deleteSheet': {'sheetId': self._sheetId}}],
-                'includeSpreadsheetInResponse': False,
-                'responseRanges': [''], # This value is meaningful only if includeSpreadsheetInResponse is True
-                'responseIncludeGridData': False # This value is meaningful only if includeSpreadsheetInResponse is True
-            })
+                'requests': [{'deleteSheet': {'sheetId': self._sheetId}}]}); _WRITE_REQUESTS += 1
         request.execute()
-        self._dataIsFresh = False
         self._spreadsheet.refresh() # Refresh the spreadsheet's list of sheets.
 
+
+    def resize(self, rowCount=None, columnCount=None):
+        global _WRITE_REQUESTS
+        # NOTE: If you try to specify the rowCount without the columnCount
+        # (and vice versa), Google Sheets thinks you want to set the
+        # columnCount to 0 and then complains that you can't delete all the
+        # columns.
+        # We have a resize() method so that the user doesn't set the row/column
+        # count back to the local setting in this Sheet object when it has
+        # been changed on Google Sheets by another user. The rowCount and
+        # columnCount property setters will make a request to get the current
+        # sizes so they don't mistakenly change the other dimension, but
+        # this won't be an atomic operation like resize() is.
+
+        # As of Feb 2019, Google Sheets has a cell max of 5,000,000, but
+        # this could change so ezsheets won't catch it.
+
+        # Google Sheets size limits are documented here:
+        #   https://support.google.com/drive/answer/37603?hl=en
+        #   https://www.quora.com/What-are-the-limits-of-Google-Sheets
+        if rowCount is None and columnCount is None:
+            return # No resizing is taking place, so this function is a no-op.
+
+        # A None value means "use the current setting"
+        if rowCount is None:
+            rowCount = self._rowCount
+        if columnCount is None:
+            columnCount = self._columnCount
+
+        if isinstance(columnCount, str):
+            columnCount = getColumnNumber(columnCount)
+
+        if not isinstance(rowCount, int):
+            raise TypeError('rowCount arg must be an int, not %s' % (type(rowCount).__name__))
+        if not isinstance(columnCount, int):
+            raise TypeError('columnCount arg must be an int, not %s' % (type(columnCount).__name__))
+
+        if rowCount < 1:
+            raise TypeError('rowCount arg must be a positive nonzero int, not %r' % (rowCount))
+        if columnCount < 1:
+            raise TypeError('columnCount arg must be a positive nonzero int, not %r' % (columnCount))
+
+        if rowCount == self._rowCount and columnCount == self._columnCount:
+            return # No change needed, so just return.
+
+        request = SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        body={
+            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+                                                                   'gridProperties': {'rowCount': rowCount,
+                                                                                      'columnCount': columnCount}},
+                                                    'fields': 'gridProperties'}}]}); _WRITE_REQUESTS += 1
+        request.execute()
+        self._rowCount = rowCount
+        self._columnCount = columnCount
+
+    def __iter__(self):
+        return iter(self.getRows())
 
     def downloadAsCSV(self):
         pass # TODO
@@ -631,9 +829,9 @@ def _getTabColorArg(value):
     if isinstance(value, str) and value in COLORS:
         # value is a color string from colorvalues.py, like 'red' or 'black'
         tabColorArg = {
-            'red': COLORS[value][0],
+            'red':   COLORS[value][0],
             'green': COLORS[value][1],
-            'blue': COLORS[value][2],
+            'blue':  COLORS[value][2],
             'alpha': COLORS[value][3],
         }
 
@@ -650,8 +848,22 @@ def _getTabColorArg(value):
             tabColorArg['alpha'] = value[3]
         except:
             tabColorArg['alpha'] = 1.0
+    elif value is None:
+        return None # Represents no tabColor setting.
+    elif type(value) == dict:
+        tabColorArg = value
     else:
-        raise ValueError("value argument must be a color string like 'red' or a 3- or 4-float tuple for an RGB or RGBA value")
+        raise ValueError("value argument must be a color string like 'red', a 3- or 4-float tuple for an RGB or RGBA value, or a dict")
+
+    # Set any remaining unspecified defaults.
+    tabColorArg.setdefault('red', 0.0)
+    tabColorArg.setdefault('green', 0.0)
+    tabColorArg.setdefault('blue', 0.0)
+    tabColorArg.setdefault('alpha', 1.0)
+    tabColorArg['red']   = float(tabColorArg['red'])
+    tabColorArg['green'] = float(tabColorArg['green'])
+    tabColorArg['blue']  = float(tabColorArg['blue'])
+    tabColorArg['alpha'] = float(tabColorArg['alpha'])
     return tabColorArg
 
 
@@ -671,10 +883,11 @@ def convertToColumnRowInts(arg):
 
 
 def createSpreadsheet(title=''):
+    global _WRITE_REQUESTS
     if not IS_INITIALIZED: init() # Initialize this module if not done so already.
     request = SERVICE.spreadsheets().create(body={
         'properties': {'title': title}
-        })
+        }); _WRITE_REQUESTS += 1
     response = request.execute()
 
     return Spreadsheet(response['spreadsheetId'])
@@ -763,5 +976,5 @@ def init(credentialsFile='credentials.json', tokenFile='token.pickle'):
 
 
 
-#init()
-#s = Spreadsheet('16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c')
+init()
+s = Spreadsheet('https://docs.google.com/spreadsheets/d/1GfFDkD7LfwlVSLQMVQILaz2BPARG7Ott5Ui-frh0m2Y/edit#gid=0')
