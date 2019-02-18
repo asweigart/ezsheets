@@ -54,6 +54,7 @@ class Spreadsheet():
 
     def refresh(self):
         global _READ_REQUESTS
+        
         request = SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId); _READ_REQUESTS += 1
         response = request.execute()
 
