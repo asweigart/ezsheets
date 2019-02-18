@@ -43,6 +43,11 @@ Features to add:
 # Sample spreadsheet id: 16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c
 
 def _logWriteRequest():
+    """
+    Logs a write request to the `_WRITE_REQUESTS` deque. This function should be
+    called whenever a Google Sheets write request is made. It will also throttle
+    requests based on the quota in WRITE_QUOTA.
+    """
     _WRITE_REQUESTS.append(time.time())
     while _WRITE_REQUESTS[0] < time.time() - 100:
         _WRITE_REQUESTS.popleft() # Get rid of all entries older than 100 seconds.
@@ -53,6 +58,11 @@ def _logWriteRequest():
             _WRITE_REQUESTS.popleft() # Get rid of all entries older than 100 seconds.
 
 def _logReadRequests():
+    """
+    Logs a read request to the `_READ_REQUESTS` deque. This function should be
+    called whenever a Google Sheets read request is made. It will also throttle
+    requests based on the quota in READ_QUOTA.
+    """
     _READ_REQUESTS.append(time.time())
     while _READ_REQUESTS[0] < time.time() - 100:
         _READ_REQUESTS.popleft() # Get rid of all entries older than 100 seconds
@@ -63,13 +73,24 @@ def _logReadRequests():
             _READ_REQUESTS.popleft() # Get rid of all entries older than 100 seconds
 
 
-
 class EZSheetsException(Exception):
-    pass # This class exists for this module to raise for EZSheets-specific problems.
+    """
+    This class exists for this module to raise for EZSheets-specific problems.
+    """
+    pass
 
 
 class Spreadsheet():
+    """
+    This class represents a Spreadsheet on Google Sheets. Spreadsheets can
+    contain one or more sheets, also called worksheets.
+    """
     def __init__(self, spreadsheetId):
+        """
+        Initializer for Spreadsheet objects.
+
+        :param spreadsheetId: The ID or URL of the spreadsheet on Google Sheets. E.g. `'https://docs.google.com/spreadsheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0'` or `'10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng'`
+        """
         if not IS_INITIALIZED: init() # Initialize this module if not done so already.
 
         self._spreadsheetId = getIdFromUrl(spreadsheetId)
@@ -77,6 +98,10 @@ class Spreadsheet():
         self.refresh()
 
     def refresh(self):
+        """
+        Updates the local Spreadsheet and Sheet objects with the current state
+        of the spreadsheet and sheets on Google Plus.
+        """
         request = SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId)
         response = request.execute(); _logReadRequests()
 
@@ -106,6 +131,9 @@ class Spreadsheet():
 
 
     def __getitem__(self, key):
+        """
+        TODO
+        """
         try:
             i = self.sheetTitles.index(key)
             return self.sheets[i]
@@ -121,6 +149,9 @@ class Spreadsheet():
         raise KeyError('key must be an int between %s and %s or a str matching a title: %r' % (-(len(self.sheets)), len(self.sheets) - 1, self.sheetTitles))
 
     def __delitem__(self, key):
+        """
+        TODO
+        """
         if isinstance(key, (int, str)):
             # Key is an int index or a str title.
             self[key].delete()
@@ -147,27 +178,48 @@ class Spreadsheet():
             raise TypeError('key must be an int index, str sheet title, or slice object, not %r' % (type(key).__name__))
 
     def __len__(self):
+        """
+        TODO
+        """
         return len(self.sheets)
 
     def __iter__(self):
+        """
+        TODO
+        """
         return iter(self.sheets)
 
     @property
     def spreadsheetId(self):
+        """
+        TODO
+        """
         return self._spreadsheetId
 
     @property
     def sheetTitles(self):
+        """
+        TODO
+        """
         return tuple([sheet.title for sheet in self.sheets])
 
     def __str__(self):
+        """
+        TODO
+        """
         return '<%s title="%s", %d sheets>' % (type(self).__name__, self.title, len(self.sheets))
 
     def __repr__(self):
+        """
+        TODO
+        """
         return '%s(spreadsheetId=%r)' % (type(self).__name__, self.spreadsheetId)
 
     @property
     def title(self):
+        """
+        TODO
+        """
         return self._title
 
     @title.setter
@@ -182,6 +234,9 @@ class Spreadsheet():
 
 
     def addSheet(self, title='', index=None, columnCount=DEFAULT_NEW_COLUMN_COUNT, rowCount=DEFAULT_NEW_ROW_COUNT):
+        """
+        TODO
+        """
         if index is None:
             # Set the index to make this new sheet be the last sheet:
             index = len(self.sheets)
@@ -198,7 +253,13 @@ class Spreadsheet():
 
 
 class Sheet():
+    """
+    TODO
+    """
     def __init__(self, spreadsheet, sheetId):
+        """
+        TODO
+        """
         #if not IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
 
         # Set the properties of this sheet
@@ -210,10 +271,16 @@ class Sheet():
     # Set up the read-only attributes.
     @property
     def spreadsheet(self):
+        """
+        TODO
+        """
         return self._spreadsheet
 
     @property
     def title(self):
+        """
+        TODO
+        """
         return self._title
 
     @title.setter
@@ -230,6 +297,9 @@ class Sheet():
 
     @property
     def tabColor(self):
+        """
+        TODO
+        """
         return self._tabColor
 
     @tabColor.setter
@@ -247,6 +317,9 @@ class Sheet():
 
     @property
     def index(self):
+        """
+        TODO
+        """
         return self._index
 
 
@@ -477,34 +550,19 @@ class Sheet():
             stopRow = self._rowCount + 1
         if not isinstance(startRow, int):
             raise TypeError('startRow arg must be an int, not %s' % (type(startRow).__name__))
+        if startRow < 1:
+            raise ValueError('startRow arg must be at least 1, not %s' % (startRow))
         if not isinstance(stopRow, int):
             raise TypeError('stopRow arg must be an int, not %s' % (type(stopRow).__name__))
+        if stopRow < 1:
+            raise ValueError('stopRow arg must be at least 1, not %s' % (stopRow))
 
         # Get rows by calling getRow():
         return [self.getRow(rowNum) for rowNum in range(startRow, stopRow)]
 
 
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return self.sheets[key]
-        elif isinstance(key, slice):
-            start = key.start if key.start is not None else 0
-            stop =  key.stop # if key.stop is None, then pass it anyways. It's fine.
-            step = key.step if key.step is not None else 1
-            return self.getRows(startRow=start, stopRow=stop, step=step)
-        elif isinstance(key, str):
-            for sheet in self.sheets:
-                if sheet.title == key:
-                    return sheet
-
-        raise KeyError('key must be an int between %s and %s or a str matching a title: %r' % (-(len(self.sheets)), len(self.sheets) - 1, self.sheetTitles))
-
-
     def __contains__(self, item):
-        if not isinstance(item, str):
-            return False
-
-        return item in self.sheetTitles
+        pass
 
 
     def getColumn(self, colNum):
@@ -529,8 +587,12 @@ class Sheet():
             stopColumn = self._columnCount + 1
         if not isinstance(startColumn, int):
             raise TypeError('startColumn arg must be an int, not %s' % (type(startColumn).__name__))
+        if startColumn < 1:
+            raise ValueError('startColumn arg must be at least 1, not %s' % (startColumn))
         if not isinstance(stopColumn, int):
             raise TypeError('stopColumn arg must be an int, not %s' % (type(stopColumn).__name__))
+        if stopColumn < 1:
+            raise ValueError('stopColumn arg must be at least 1, not %s' % (stopColumn))
 
         # Get columns by calling getColumn():
         return [self.getColumn(colNum) for colNum in range(startColumn, stopColumn)]

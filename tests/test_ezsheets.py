@@ -419,6 +419,16 @@ def test_updateRows(init, checkPreAndPostCondition):
     assert newSheet.getRows(stopRow=4) == [['', '', '', ''], ['a', 'b', 'c', ''], ['d', 'e', 'f', '']]
     assert newSheet.getRows(startRow=2, stopRow=4) == [['a', 'b', 'c', ''], ['d', 'e', 'f', '']]
 
+    # Test invalid argumnets:
+    with pytest.raises(TypeError):
+        newSheet.getRows(startRow='invalid arg')
+    with pytest.raises(TypeError):
+        newSheet.getRows(stopRow='invalid arg')
+    with pytest.raises(ValueError):
+        newSheet.getRows(startRow=0)
+    with pytest.raises(ValueError):
+        newSheet.getRows(startRow=-9999)
+
     newSheet.delete()
 
 
@@ -454,6 +464,16 @@ def test_updateColumns(init, checkPreAndPostCondition):
     assert newSheet.getColumns(startColumn=2) == [['a', 'b', 'c', ''], ['d', 'e', 'f', ''], ['g', 'h', 'i', ''], ['', '', '', '']]
     assert newSheet.getColumns(stopColumn=4) == [['', '', '', ''], ['a', 'b', 'c', ''], ['d', 'e', 'f', '']]
     assert newSheet.getColumns(startColumn=2, stopColumn=4) == [['a', 'b', 'c', ''], ['d', 'e', 'f', '']]
+
+    # Test invalid argumnets:
+    with pytest.raises(TypeError):
+        newSheet.getColumns(startColumn='invalid arg')
+    with pytest.raises(TypeError):
+        newSheet.getColumns(startColumn='invalid arg')
+    with pytest.raises(ValueError):
+        newSheet.getColumns(startColumn=0)
+    with pytest.raises(ValueError):
+        newSheet.getColumns(startColumn=-9999)
 
     newSheet.delete()
 
@@ -526,6 +546,22 @@ def test_update_and_get(init, checkPreAndPostCondition):
         newSheet.update(-1, 1, 'value') # Test with wrong argument type.
     with pytest.raises(IndexError):
         newSheet.update(1, -1, 'value') # Test with wrong argument type.
+
+    # Test getRow() and getColumn() with invalid arguments.
+    with pytest.raises(TypeError):
+        newSheet.getRow('invalid arg')
+    with pytest.raises(IndexError):
+        newSheet.getRow(0)
+    with pytest.raises(IndexError):
+        newSheet.getRow(-9999)
+    with pytest.raises(TypeError):
+        newSheet.getColumn({})
+    with pytest.raises(ValueError):
+        newSheet.getColumn('AAAAinvalid arg')
+    with pytest.raises(IndexError):
+        newSheet.getColumn(0)
+    with pytest.raises(IndexError):
+        newSheet.getColumn(-9999)
 
     newSheet.delete()
 
@@ -624,6 +660,8 @@ def test_gridProperties_settersGetters(init, checkPreAndPostCondition):
     assert FIXED_SPREADSHEET[0].columnGroupControlAfter == False
 
 
+def test_getitem(init, checkPreAndPostCondition):
+    pass # TODO LEFT OFF
 
 if __name__ == '__main__':
     pytest.main()
