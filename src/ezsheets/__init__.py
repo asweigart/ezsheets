@@ -9,13 +9,20 @@ import os.path
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from apiclient.http import MediaIoBaseDownload
 
 __version__ = '0.0.2'
 
-#SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SERVICE_SHEETS = None
-IS_INITIALIZED = False
+#SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets']
+SHEETS_SERVICE = None
+SHEETS_IS_INITIALIZED = False
+
+#SCOPES_DRIVE = ['https://www.googleapis.com/auth/drive.readonly']
+SCOPES_DRIVE = ['https://www.googleapis.com/auth/drive']
+DRIVE_SERVICE = None
+DRIVE_IS_INITIALIZED = False
+
 
 DEFAULT_NEW_ROW_COUNT = 1000  # This is the Google Sheets default for a new Sheet.
 DEFAULT_NEW_COLUMN_COUNT = 26 # This is the Google Sheets default for a new Sheet.
@@ -105,9 +112,10 @@ class Spreadsheet():
 
         :param spreadsheetId: The ID or URL of the spreadsheet on Google Sheets. E.g. `'https://docs.google.com/spreadsheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0'` or `'10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng'`
         """
-        if not IS_INITIALIZED: init() # Initialize this module if not done so already.
+        if not SHEETS_IS_INITIALIZED: init() # Initialize this module if not done so already.
 
         self._spreadsheetId = getIdFromUrl(spreadsheetId)
+        self._url = 'https://docs.google.com/spreadsheets/d/' + self._spreadsheetId + '/'
         self.sheets = ()
         self.refresh()
 
@@ -116,7 +124,7 @@ class Spreadsheet():
         Updates this Spreadsheet object's Sheet objects with the current data
         of the spreadsheet and sheets on Google sheets.
         """
-        request = SERVICE_SHEETS.spreadsheets().get(spreadsheetId=self._spreadsheetId)
+        request = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId)
         response = request.execute(); _logReadRequests()
 
         self._title = response['properties']['title']
@@ -215,6 +223,13 @@ class Spreadsheet():
         return self._spreadsheetId
 
     @property
+    def url(self):
+        """
+        The URL for this Spreadsheet on Google Sheets.
+        """
+        return self._url
+
+    @property
     def sheetTitles(self):
         """
         A tuple of the Sheet objects' titles (as strings) in this Spreadsheet object.
@@ -243,7 +258,7 @@ class Spreadsheet():
     @title.setter
     def title(self, value):
         value = str(value)
-        request = SERVICE_SHEETS.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
         body={
             'requests': [{'updateSpreadsheetProperties': {'properties': {'title': value},
                                                           'fields': 'title'}}]})
@@ -259,7 +274,7 @@ class Spreadsheet():
             # Set the index to make this new sheet be the last sheet:
             index = len(self.sheets)
 
-        request = SERVICE_SHEETS.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
         body={
             'requests': [{'addSheet': {'properties': {'title': title, 'index': index}}}]})
         request.execute(); _logWriteRequest()
@@ -268,6 +283,59 @@ class Spreadsheet():
         self.sheets[index].resize(columnCount, rowCount)
         return self.sheets[index]
 
+
+    def _download(self, filename=None, _fileType='spreadsheet'):
+        if not DRIVE_IS_INITIALIZED:
+            initDrive()
+
+        fileTypes = {'csv':  'text/csv',
+                     'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     'ods':  'application/x-vnd.oasis.opendocument.spreadsheet',
+                     'pdf':  'application/pdf',
+                     'html': 'application/zip', # a zip file of html files
+                     'tsv':  'text/tab-separated-values'}
+
+        if filename is None:
+            filename=_makeFilenameSafe(self._title) + '.' + _fileType
+
+        request = DRIVE_SERVICE.files().export_media(fileId=self._spreadsheetId,
+                                                     mimeType=fileTypes[_fileType])
+        fh = open(filename, 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk()
+
+        return filename
+
+    def downloadAsCSV(self, filename=None):
+        return self._download(filename, 'csv')
+
+    def downloadAsExcel(self, filename=None):
+        return self._download(filename, 'xlsx')
+
+    def downloadAsODS(self, filename=None):
+        return self._download(filename, 'ods')
+
+    def downloadAsPDF(self, filename=None):
+        return self._download(filename, 'pdf')
+
+    def downloadAsHTML(self, filename=None):
+        return self._download(filename, 'html')
+
+    def downloadAsTSV(self, filename=None):
+        return self._download(filename, 'tsv')
+
+    def delete(self):
+        if not DRIVE_IS_INITIALIZED:
+            initDrive()
+
+        DRIVE_SERVICE.files().delete(fileId=self._spreadsheetId).execute()
+
+def _makeFilenameSafe(filename):
+    for replaceChar in ' \\/:*?"<>|':
+        filename = filename.replace(replaceChar, '_')
+    return filename
 
 
 class Sheet():
@@ -279,7 +347,7 @@ class Sheet():
         """
         TODO
         """
-        #if not IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
+        #if not SHEETS_IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
 
         # Set the properties of this sheet
         self._spreadsheet = spreadsheet
@@ -305,7 +373,7 @@ class Sheet():
     @title.setter
     def title(self, value):
         value = str(value)
-        request = SERVICE_SHEETS.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'title': value},
@@ -325,7 +393,7 @@ class Sheet():
     def tabColor(self, value):
         tabColorArg = _getTabColorArg(value)
 
-        request = SERVICE_SHEETS.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'tabColor': tabColorArg},
@@ -361,7 +429,7 @@ class Sheet():
         if value > self._index:
             value += 1 # Google Sheets uses "before the move" indexes, which is confusing and I don't want to do it here.
 
-        request = SERVICE_SHEETS.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'index': value},
@@ -545,7 +613,7 @@ class Sheet():
         """
         TODO
         """
-        return '<%s sheetId=%r, title=%r, rowCount=%r, columnCount=%r>' % (type(self).__name__, self.sheetId, self._title, self._rowCount, self._columnCount)
+        return '<%s sheetId=%r, title=%r, rowCount=%r, columnCount=%r>' % (type(self).__name__, self._sheetId, self._title, self._rowCount, self._columnCount)
 
 
     def get(self, *args):
@@ -674,7 +742,7 @@ class Sheet():
 
     def _refreshProperties(self):
         # Get all the sheet properties:
-        response = SERVICE_SHEETS.spreadsheets().get(spreadsheetId=self._spreadsheet._spreadsheetId).execute(); _logReadRequests()
+        response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheet._spreadsheetId).execute(); _logReadRequests()
 
         for sheetDict in response['sheets']:
             if sheetDict['properties']['sheetId'] == self._sheetId: # Find this sheet in the returned spreadsheet json data.
@@ -703,7 +771,7 @@ class Sheet():
 
     def _refreshData(self):
         # Get all the sheet data:
-        response = SERVICE_SHEETS.spreadsheets().values().get(
+        response = SHEETS_SERVICE.spreadsheets().values().get(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount)).execute(); _logReadRequests()
 
@@ -727,7 +795,7 @@ class Sheet():
                           'hideGridlines':           self._hideGridlines,
                           'rowGroupControlAfter':    self._rowGroupControlAfter,
                           'columnGroupControlAfter': self._columnGroupControlAfter}
-        request = SERVICE_SHEETS.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
             body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'gridProperties': gridProperties},
@@ -771,7 +839,7 @@ class Sheet():
         self._enlargeIfNeeded(column, row)
 
         cellLocation = getColumnLetterOf(column) + str(row)
-        request = SERVICE_SHEETS.spreadsheets().values().update(
+        request = SHEETS_SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!%s:%s' % (self._title, cellLocation, cellLocation),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
@@ -805,7 +873,7 @@ class Sheet():
 
         self._enlargeIfNeeded(None, row)
 
-        request = SERVICE_SHEETS.spreadsheets().values().update(
+        request = SHEETS_SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
@@ -842,7 +910,7 @@ class Sheet():
 
         self._enlargeIfNeeded(column, None)
 
-        request = SERVICE_SHEETS.spreadsheets().values().update(
+        request = SHEETS_SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
@@ -891,7 +959,7 @@ class Sheet():
 
         # Send the API request that updates the Google sheet.
         #rangeCells = '%s!A%s:%s%s' % (self._title, startRow, getColumnLetterOf(maxColumnCount), stopRow - 1)
-        request = SERVICE_SHEETS.spreadsheets().values().update(
+        request = SHEETS_SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!A%s:%s%s' % (self._title, startRow, getColumnLetterOf(maxColumnCount), startRow + len(rows) - 1),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
@@ -940,7 +1008,7 @@ class Sheet():
 
         # Send the API request that updates the Google sheet.
         #rangeCells = '%s!A%s:%s%s' % (self._title, startRow, getColumnLetterOf(maxColumnCount), stopRow - 1)
-        request = SERVICE_SHEETS.spreadsheets().values().update(
+        request = SHEETS_SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(startColumn), getColumnLetterOf(startColumn + len(columns) - 1), maxRowCount),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
@@ -979,7 +1047,7 @@ class Sheet():
 
         # Send the API request that updates the Google sheet.
         rangeCells = '%s!%s1:%s%s' % (self._title, getColumnLetterOf(startColumn), getColumnLetterOf(len(columns)), len(columns[0]))
-        request = SERVICE_SHEETS.spreadsheets().values().update(
+        request = SHEETS_SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range=rangeCells,
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
@@ -998,7 +1066,7 @@ class Sheet():
     """
 
     def clear(self):
-        request = SERVICE_SHEETS.spreadsheets().values().update(
+        request = SHEETS_SERVICE.spreadsheets().values().update(
             spreadsheetId=self._spreadsheet._spreadsheetId,
             range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount),
             valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
@@ -1015,7 +1083,7 @@ class Sheet():
 
 
     def copyTo(self, destinationSpreadsheetId):
-        request = SERVICE_SHEETS.spreadsheets().sheets().copyTo(spreadsheetId=self._spreadsheet._spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().sheets().copyTo(spreadsheetId=self._spreadsheet._spreadsheetId,
                                                          sheetId=self._sheetId,
                                                          body={'destinationSpreadsheetId': destinationSpreadsheetId})
         request.execute(); _logWriteRequest()
@@ -1025,7 +1093,7 @@ class Sheet():
         if len(self._spreadsheet.sheets) == 1:
             raise ValueError('Cannot delete all sheets; spreadsheets must have at least one sheet')
 
-        request = SERVICE_SHEETS.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
             body={
                 'requests': [{'deleteSheet': {'sheetId': self._sheetId}}]})
         request.execute(); _logWriteRequest()
@@ -1075,7 +1143,7 @@ class Sheet():
             raise TypeError('columnCount arg must be a positive nonzero int, not %r' % (columnCount))
 
 
-        request = SERVICE_SHEETS.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
         body={
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'gridProperties': {'rowCount': rowCount,
@@ -1102,19 +1170,6 @@ class Sheet():
 
     def __iter__(self):
         return iter(self.getRows())
-
-    def downloadAsCSV(self):
-        pass # TODO
-    def downloadAsExcel(self):
-        pass # TODO
-    def downloadAsODS(self):
-        pass # TODO
-    def downloadAsPDF(self):
-        pass # TODO
-    def downloadAsHTML(self):
-        pass # TODO
-    def downloadAsTSV(self):
-        pass # TODO
 
 
 def _getTabColorArg(value):
@@ -1175,8 +1230,8 @@ def convertToColumnRowInts(arg):
 
 
 def createSpreadsheet(title=''):
-    if not IS_INITIALIZED: init() # Initialize this module if not done so already.
-    request = SERVICE_SHEETS.spreadsheets().create(body={
+    if not SHEETS_IS_INITIALIZED: init() # Initialize this module if not done so already.
+    request = SHEETS_SERVICE.spreadsheets().create(body={
         'properties': {'title': title}
         })
     response = request.execute(); _logWriteRequest()
@@ -1236,18 +1291,19 @@ def getColumnNumber(columnLetter):
     return number
 
 
-def init(credentialsFile='credentials-sheets.json', tokenFile='token-sheets.pickle'):
-    global SERVICE_SHEETS, IS_INITIALIZED
+def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickle'):
+    global SHEETS_SERVICE, SHEETS_IS_INITIALIZED
 
     if not os.path.exists(credentialsFile):
         raise EZSheetsException('Can\'t find credentials file at %s. You can download this file from https://developers.google.com/sheets/api/quickstart/python  and clicking "Enable the Google Sheets API". Rename the downloaded file to credentials-sheets.json.' % (os.path.abspath(credentialsFile)))
 
+    # Log in to Google Sheets API to generate token-sheets.pickle.
     creds = None
     # The file token-sheets.pickle stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first
     # time.
-    if os.path.exists('token-sheets.pickle'):
-        with open('token-sheets.pickle', 'rb') as token:
+    if os.path.exists(sheetsTokenFile):
+        with open(sheetsTokenFile, 'rb') as token:
             creds = pickle.load(token)
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
@@ -1255,17 +1311,66 @@ def init(credentialsFile='credentials-sheets.json', tokenFile='token-sheets.pick
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials-sheets.json', SCOPES)
+                credentialsFile, SCOPES_SHEETS)
             creds = flow.run_local_server()
         # Save the credentials for the next run
-        with open('token-sheets.pickle', 'wb') as token:
+        with open(sheetsTokenFile, 'wb') as token:
             pickle.dump(creds, token)
 
-    SERVICE_SHEETS = build('sheets', 'v4', credentials=creds)
-    IS_INITIALIZED = True
+    SHEETS_SERVICE = build('sheets', 'v4', credentials=creds)
 
+    SHEETS_IS_INITIALIZED = True
+
+
+def initDrive(credentialsFile='credentials.json', driveTokenFile='token-drive.pickle'):
+    global DRIVE_SERVICE, DRIVE_IS_INITIALIZED
+
+    if not os.path.exists(credentialsFile):
+        raise EZSheetsException('Can\'t find credentials file at %s. You can download this file from https://developers.google.com/sheets/api/quickstart/python  and clicking "Enable the Google Sheets API". Rename the downloaded file to credentials-sheets.json.' % (os.path.abspath(credentialsFile)))
+
+    # Log in to Google Drive API to generate token-drive.pickle.
+    creds = None
+    # The file token.pickle stores the user's access and refresh tokens, and is
+    # created automatically when the authorization flow completes for the first
+    # time.
+    if os.path.exists(driveTokenFile):
+        with open(driveTokenFile, 'rb') as token:
+            creds = pickle.load(token)
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                credentialsFile, SCOPES_DRIVE)
+            creds = flow.run_local_server()
+        # Save the credentials for the next run
+        with open(driveTokenFile, 'wb') as token:
+            pickle.dump(creds, token)
+
+    DRIVE_SERVICE = build('drive', 'v3', credentials=creds)
+
+
+def listAllSpreadsheets():
+    if not DRIVE_IS_INITIALIZED:
+        initDrive()
+
+    spreadsheets = {} # key is ID, value is title
+    page_token = None
+    while True:
+        response = DRIVE_SERVICE.files().list(q="mimeType='application/vnd.google-apps.spreadsheet'",
+                                              spaces='drive',
+                                              fields='nextPageToken, files(id, name)',
+                                              pageToken=page_token).execute()
+
+        for file in response.get('files', []):
+            spreadsheets[file.get('id')] = file.get('name')
+        page_token = response.get('nextPageToken', None)
+        if page_token is None:
+            break
+    return spreadsheets
 
 
 
 init()
-s = Spreadsheet('https://docs.google.com/spreadsheets/d/1GfFDkD7LfwlVSLQMVQILaz2BPARG7Ott5Ui-frh0m2Y/edit#gid=0')
+s = Spreadsheet('https://docs.google.com/spreadsheets/d/1lRyPHuaLIgqYwkCTJYexbZUO1dcWeunm69B0L7L4ZQ8/edit#gid=0')
