@@ -12,7 +12,7 @@ import os.path
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-from apiclient.http import MediaIoBaseDownload
+from apiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 __version__ = '0.0.2'
 
@@ -118,7 +118,6 @@ class Spreadsheet():
         if not IS_INITIALIZED: init() # Initialize this module if not done so already.
 
         self._spreadsheetId = getIdFromUrl(spreadsheetId)
-        self._url = 'https://docs.google.com/spreadsheets/d/' + self._spreadsheetId + '/'
         self.sheets = ()
         self.refresh()
 
@@ -238,7 +237,7 @@ class Spreadsheet():
         """
         The URL for this Spreadsheet on Google Sheets.
         """
-        return self._url
+        return 'https://docs.google.com/spreadsheets/d/' + self._spreadsheetId + '/'
 
     @property
     def sheetTitles(self):
@@ -303,7 +302,7 @@ class Spreadsheet():
                      'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                      'ods':  'application/x-vnd.oasis.opendocument.spreadsheet',
                      'pdf':  'application/pdf',
-                     'html': 'application/zip', # a zip file of html files
+                     'zip':  'application/zip', # a zip file of html files
                      'tsv':  'text/tab-separated-values'}
 
         if filename is None:
@@ -332,7 +331,7 @@ class Spreadsheet():
         return self._download(filename, 'pdf')
 
     def downloadAsHTML(self, filename=None):
-        return self._download(filename, 'html')
+        return self._download(filename, 'zip')
 
     def downloadAsTSV(self, filename=None):
         return self._download(filename, 'tsv')
@@ -1375,6 +1374,31 @@ def listAllSpreadsheets():
             break
     return spreadsheets
 
+
+def upload(filename):
+    # TODO - be able to pass a file object for `filename`, not just a string name of a file on the hard drive.
+
+    if filename.lower().endswith('.xlsx'):
+        mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    elif filename.lower().endswith('.ods'):
+        mimeType = 'application/x-vnd.oasis.opendocument.spreadsheet'
+    elif filename.lower().endswith('.csv'):
+        mimeType = 'text/csv'
+    elif filename.lower().endswith('.tsv'):
+        mimeType = 'text/tab-separated-values'
+    else:
+        raise ValueError('File to upload must be a .xlsx (Excel), .ods (OpenOffice), .csv (Comma-separated), or .tsv (Tab-separated) file type.')
+
+    if not os.path.exists(filename):
+        raise FileNotFoundError('Unable to find a file named %s' % (os.path.abspath(filename)))
+
+
+    media = MediaFileUpload(filename,
+                            mimetype=mimeType)
+    file = DRIVE_SERVICE.files().create(body={'name': filename, 'mimeType': 'application/vnd.google-apps.spreadsheet'},
+                                        media_body=media,
+                                        fields='id').execute()
+    return Spreadsheet(file.get('id'))
 
 
 
