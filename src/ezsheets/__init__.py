@@ -4,6 +4,9 @@
 # IMPORTANT NOTE: This module has not been stress-tested for performance
 # and should not be considered "thread-safe" if multiple users are
 
+# TODO - figure out drive quotas
+# TODO - batch mode?
+
 import pickle, re, collections, time
 import os.path
 from googleapiclient.discovery import build
@@ -16,12 +19,12 @@ __version__ = '0.0.2'
 #SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets']
 SHEETS_SERVICE = None
-SHEETS_IS_INITIALIZED = False
+IS_INITIALIZED = False
 
 #SCOPES_DRIVE = ['https://www.googleapis.com/auth/drive.readonly']
 SCOPES_DRIVE = ['https://www.googleapis.com/auth/drive']
 DRIVE_SERVICE = None
-DRIVE_IS_INITIALIZED = False
+IS_INITIALIZED = False
 
 
 DEFAULT_NEW_ROW_COUNT = 1000  # This is the Google Sheets default for a new Sheet.
@@ -112,7 +115,7 @@ class Spreadsheet():
 
         :param spreadsheetId: The ID or URL of the spreadsheet on Google Sheets. E.g. `'https://docs.google.com/spreadsheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0'` or `'10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng'`
         """
-        if not SHEETS_IS_INITIALIZED: init() # Initialize this module if not done so already.
+        if not IS_INITIALIZED: init() # Initialize this module if not done so already.
 
         self._spreadsheetId = getIdFromUrl(spreadsheetId)
         self._url = 'https://docs.google.com/spreadsheets/d/' + self._spreadsheetId + '/'
@@ -128,6 +131,14 @@ class Spreadsheet():
         response = request.execute(); _logReadRequests()
 
         self._title = response['properties']['title']
+
+        # Delete local Sheets that are no longer in the online spreadsheet:
+        remoteSheetIds = [sheetInfo['properties']['sheetId'] for sheetInfo in response['sheets']]
+        replacementSheetsAttr = [] # We will replace self.sheets with this list.
+        for sheet in self.sheets:
+            if sheet._sheetId in remoteSheetIds:
+                replacementSheetsAttr.append(sheet)
+        self.sheets = replacementSheetsAttr
 
         # Update/create Sheet objects:
         replacementSheetsAttr = [] # We will replace self.sheets with this list.
@@ -285,8 +296,8 @@ class Spreadsheet():
 
 
     def _download(self, filename=None, _fileType='spreadsheet'):
-        if not DRIVE_IS_INITIALIZED:
-            initDrive()
+        if not IS_INITIALIZED:
+            init()
 
         fileTypes = {'csv':  'text/csv',
                      'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -327,8 +338,8 @@ class Spreadsheet():
         return self._download(filename, 'tsv')
 
     def delete(self):
-        if not DRIVE_IS_INITIALIZED:
-            initDrive()
+        if not IS_INITIALIZED:
+            init()
 
         DRIVE_SERVICE.files().delete(fileId=self._spreadsheetId).execute()
 
@@ -347,7 +358,7 @@ class Sheet():
         """
         TODO
         """
-        #if not SHEETS_IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
+        #if not IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
 
         # Set the properties of this sheet
         self._spreadsheet = spreadsheet
@@ -1230,7 +1241,7 @@ def convertToColumnRowInts(arg):
 
 
 def createSpreadsheet(title=''):
-    if not SHEETS_IS_INITIALIZED: init() # Initialize this module if not done so already.
+    if not IS_INITIALIZED: init() # Initialize this module if not done so already.
     request = SHEETS_SERVICE.spreadsheets().create(body={
         'properties': {'title': title}
         })
@@ -1291,8 +1302,8 @@ def getColumnNumber(columnLetter):
     return number
 
 
-def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickle'):
-    global SHEETS_SERVICE, SHEETS_IS_INITIALIZED
+def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickle', driveTokenFile='token-drive.pickle'):
+    global SHEETS_SERVICE, DRIVE_SERVICE, IS_INITIALIZED
 
     if not os.path.exists(credentialsFile):
         raise EZSheetsException('Can\'t find credentials file at %s. You can download this file from https://developers.google.com/sheets/api/quickstart/python  and clicking "Enable the Google Sheets API". Rename the downloaded file to credentials-sheets.json.' % (os.path.abspath(credentialsFile)))
@@ -1319,14 +1330,6 @@ def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickl
 
     SHEETS_SERVICE = build('sheets', 'v4', credentials=creds)
 
-    SHEETS_IS_INITIALIZED = True
-
-
-def initDrive(credentialsFile='credentials.json', driveTokenFile='token-drive.pickle'):
-    global DRIVE_SERVICE, DRIVE_IS_INITIALIZED
-
-    if not os.path.exists(credentialsFile):
-        raise EZSheetsException('Can\'t find credentials file at %s. You can download this file from https://developers.google.com/sheets/api/quickstart/python  and clicking "Enable the Google Sheets API". Rename the downloaded file to credentials-sheets.json.' % (os.path.abspath(credentialsFile)))
 
     # Log in to Google Drive API to generate token-drive.pickle.
     creds = None
@@ -1350,10 +1353,12 @@ def initDrive(credentialsFile='credentials.json', driveTokenFile='token-drive.pi
 
     DRIVE_SERVICE = build('drive', 'v3', credentials=creds)
 
+    IS_INITIALIZED = True
+
 
 def listAllSpreadsheets():
-    if not DRIVE_IS_INITIALIZED:
-        initDrive()
+    if not IS_INITIALIZED:
+        init()
 
     spreadsheets = {} # key is ID, value is title
     page_token = None
@@ -1372,5 +1377,5 @@ def listAllSpreadsheets():
 
 
 
-init()
-s = Spreadsheet('https://docs.google.com/spreadsheets/d/1lRyPHuaLIgqYwkCTJYexbZUO1dcWeunm69B0L7L4ZQ8/edit#gid=0')
+
+#s = Spreadsheet('https://docs.google.com/spreadsheets/d/1lRyPHuaLIgqYwkCTJYexbZUO1dcWeunm69B0L7L4ZQ8/edit#gid=0')
