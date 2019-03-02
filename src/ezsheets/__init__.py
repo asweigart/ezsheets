@@ -168,16 +168,18 @@ class Spreadsheet():
 
         :param key An integer index of the Sheet to retrieve.
         """
-        try:
-            i = self.sheetTitles.index(key)
-            return self.sheets[i]
-        except ValueError:
-            pass # Do nothing if the title isn't found.
-
-
-        if isinstance(key, int) and (-len(self.sheets) <= key < len(self.sheets)):
+        if isinstance(key, str):
+            # Assume key is a sheet title:
+            try:
+                i = self.sheetTitles.index(key)
+                return self.sheets[i]
+            except ValueError:
+                pass # Do nothing if the title isn't found.
+        elif isinstance(key, int) and (-len(self.sheets) <= key < len(self.sheets)):
+            # Assume key is an integer index:
             return self.sheets[key]
-        if isinstance(key, slice):
+        elif isinstance(key, slice):
+            # Assume key is a slice object:
             return self.sheets[key]
 
         raise KeyError('key must be an int between %s and %s or a str matching a title: %r' % (-(len(self.sheets)), len(self.sheets) - 1, self.sheetTitles))
@@ -295,9 +297,6 @@ class Spreadsheet():
 
 
     def _download(self, filename=None, _fileType='spreadsheet'):
-        if not IS_INITIALIZED:
-            init()
-
         fileTypes = {'csv':  'text/csv',
                      'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                      'ods':  'application/x-vnd.oasis.opendocument.spreadsheet',
@@ -336,11 +335,16 @@ class Spreadsheet():
     def downloadAsTSV(self, filename=None):
         return self._download(filename, 'tsv')
 
-    def delete(self):
-        if not IS_INITIALIZED:
-            init()
+    def delete(self, permanent=False):
+        if permanent:
+            # Delete spreadsheet without moving it to Trashed folder:
+            DRIVE_SERVICE.files().delete(fileId=self._spreadsheetId).execute()
+        else:
+            # Delete spreadsheet by moving it to Trashed folder:
+            DRIVE_SERVICE.files().update(fileId=self._spreadsheetId,
+                                         body={'trashed': True}).execute()
 
-        DRIVE_SERVICE.files().delete(fileId=self._spreadsheetId).execute()
+
 
 def _makeFilenameSafe(filename):
     for replaceChar in ' \\/:*?"<>|':
@@ -357,7 +361,7 @@ class Sheet():
         """
         TODO
         """
-        #if not IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
+        if not IS_INITIALIZED: init() # Initialize this module if not done so already. # This line might not be needed? Sheet objects can only exist when you've already made a Spreadsheet object.
 
         # Set the properties of this sheet
         self._spreadsheet = spreadsheet
@@ -715,7 +719,7 @@ class Sheet():
     def getColumn(self, colNum):
         # NOTE: getRow() and getCol() do not support negative indexes.
         if isinstance(colNum, str):
-            colNum = getColumnNumber(colNum)
+            colNum = getColumnNumberOf(colNum)
 
         if not isinstance(colNum, int):
             raise TypeError('colNum indices must be integers, not %s' % (type(colNum).__name__))
@@ -913,7 +917,7 @@ class Sheet():
         if isinstance(values, tuple):
             values = list(values)
         if isinstance(column, str):
-            column = getColumnNumber(column)
+            column = getColumnNumberOf(column)
 
         if len(values) < self._rowCount:
             values.extend([''] * (self._rowCount - len(values)))
@@ -1140,7 +1144,7 @@ class Sheet():
             columnCount = self._columnCount
 
         if isinstance(columnCount, str):
-            columnCount = getColumnNumber(columnCount)
+            columnCount = getColumnNumberOf(columnCount)
 
         if not isinstance(rowCount, int):
             raise TypeError('rowCount arg must be an int, not %s' % (type(rowCount).__name__))
@@ -1164,17 +1168,29 @@ class Sheet():
         self._columnCount = columnCount
 
 
-    def __getitem__(self, key):
-        if isinstance(key, str):
-            return self.get(key)
+    def __getitem__(self, *key):
+        if isinstance(key[0], str):
+            # Key is assumed to be an address like 'A1'
+            return self.get(key[0])
+        elif len(key[0]) == 2:
+            # Key is assumed to be a tuple of column, row addresses
+            return self.get(*key[0])
         else:
+            # Let get() handle raising an error.
             return self.get(*key)
 
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, *args):
+        if len(args) < 2:
+            raise TypeError('__setitem__() requires at least two arguments')
+        key = args[:-1]
+        value = args[-1]
+
         if isinstance(key, str):
+            # Key is assumed to be an address like 'A1'
             return self.update(key, value)
         else:
+            # Key is assumed to be a tuple of column, row addresses
             return self.update(*key, value)
 
 
@@ -1232,7 +1248,7 @@ def convertToColumnRowInts(arg):
 
     for i in range(1, len(arg)):
         if arg[i].isdecimal():
-            column = getColumnNumber(arg[:i])
+            column = getColumnNumberOf(arg[:i])
             row = int(arg[i:])
             return (column, row)
 
@@ -1278,8 +1294,8 @@ def getColumnLetterOf(columnNumber):
     return ''.join(reversed(letters))
 
 
-def getColumnNumber(columnLetter):
-    """getColumnNumber('A') => 1, getColumnNumber('AA') => 27"""
+def getColumnNumberOf(columnLetter):
+    """getColumnNumberOf('A') => 1, getColumnNumberOf('AA') => 27"""
     if not isinstance(columnLetter, str):
         raise TypeError('columnLetter must be a str, not a %r' % (type(columnLetter).__name__))
     if not columnLetter.isalpha():
@@ -1301,8 +1317,32 @@ def getColumnNumber(columnLetter):
     return number
 
 
+def convertAddress(*address):
+    if len(address) < 1 or len(address) > 2:
+        raise TypeError('The address argument must be a singe string like "A1" or a tuple of two 1-based integers.')
+
+    if isinstance(address[0], str):
+        # Convert 'A2' to (1, 2)
+        return convertToColumnRowInts(address[0])
+
+    if isinstance(address[0], (tuple, list)) and len(address[0]) == 2:
+        # If a tuple was passed, split it into two ints:
+        if not isinstance(address[0][0], int) or not isinstance(address[0][1], int):
+            raise TypeError('The address argument must be a singe string like "A1" or a tuple of two 1-based integers.')
+        address = address[0][0], address[0][1]
+
+
+    if isinstance(address[0], int) and isinstance(address[1], int) and address[0] > 0 and address[1] > 0:
+        # Convert (1, 2) to 'A2'
+        return getColumnLetterOf(address[0]) + str(address[1])
+
+    raise TypeError('The address argument must be a singe string like "A1" or a tuple of two 1-based integers.')
+
+
 def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickle', driveTokenFile='token-drive.pickle'):
     global SHEETS_SERVICE, DRIVE_SERVICE, IS_INITIALIZED
+
+    IS_INITIALIZED = False # Set this to False, in case module was initialized before but this current initialization fails.
 
     if not os.path.exists(credentialsFile):
         raise EZSheetsException('Can\'t find credentials file at %s. You can download this file from https://developers.google.com/sheets/api/quickstart/python  and clicking "Enable the Google Sheets API". Rename the downloaded file to credentials-sheets.json.' % (os.path.abspath(credentialsFile)))
@@ -1355,9 +1395,8 @@ def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickl
     IS_INITIALIZED = True
 
 
-def listAllSpreadsheets():
-    if not IS_INITIALIZED:
-        init()
+def listSpreadsheets():
+    if not IS_INITIALIZED: init()
 
     spreadsheets = {} # key is ID, value is title
     page_token = None
@@ -1376,6 +1415,7 @@ def listAllSpreadsheets():
 
 
 def upload(filename):
+    if not IS_INITIALIZED: init()
     # TODO - be able to pass a file object for `filename`, not just a string name of a file on the hard drive.
 
     if filename.lower().endswith('.xlsx'):
