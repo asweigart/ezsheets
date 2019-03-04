@@ -7,12 +7,14 @@
 # TODO - figure out drive quotas
 # TODO - batch mode?
 
-import pickle, re, collections, time
+import pickle, re, collections, time, webbrowser
 import os.path
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from apiclient.http import MediaIoBaseDownload, MediaFileUpload
+
 
 __version__ = '0.0.2'
 
@@ -40,8 +42,8 @@ from ezsheets.colorvalues import COLORS
 # Quota throttling:
 _READ_REQUESTS = collections.deque()
 _WRITE_REQUESTS = collections.deque()
-READ_QUOTA = 50 # 50 reads per 100 seconds
-WRITE_QUOTA = 50 # 50 writes per 100 seconds
+READ_QUOTA = 90 # 50 reads per 100 seconds
+WRITE_QUOTA = 90 # 50 writes per 100 seconds
 IGNORE_QUOTA = False
 
 """
@@ -59,20 +61,20 @@ def _logWriteRequest():
     called whenever a Google Sheets write request is made. It will also throttle
     requests based on the quota in the global WRITE_QUOTA constant.
 
-    By default, READ_QUOTA is set to 50 so that only 50 read requests can be
-    made in the last 100 seconds. TODO - notes about quote roles
+    By default, WRITE_QUOTA is set to 100 so that only 100 read requests can be
+    made in the last 101 seconds.
     """
     _WRITE_REQUESTS.append(time.time())
-    while _WRITE_REQUESTS[0] < time.time() - 100:
+    while _WRITE_REQUESTS[0] < time.time() - 101: # 101 seconds rather than 100 in case of general inaccuracy
         _WRITE_REQUESTS.popleft() # Get rid of all entries older than 100 seconds.
 
     if IGNORE_QUOTA:
         return # Don't throttle.
 
     # Throttle if necessary:
-    while len(_WRITE_REQUESTS) > WRITE_QUOTA: # pragma: no cover
+    while len(_WRITE_REQUESTS) > (WRITE_QUOTA - 1): # pragma: no cover Note that the actual quota is one less than WRITE_QUOTA
         time.sleep(1)
-        while _WRITE_REQUESTS[0] < time.time() - 100:
+        while _WRITE_REQUESTS[0] < time.time() - 101:
             _WRITE_REQUESTS.popleft() # Get rid of all entries older than 100 seconds.
 
 def _logReadRequests():
@@ -82,18 +84,18 @@ def _logReadRequests():
     requests based on the quota in the global READ_QUOTA constant.
 
     By default, READ_QUOTA is set to 50 so that only 50 read requests can be
-    made in the last 100 seconds.
+    made in the last 101 seconds.
     """
     _READ_REQUESTS.append(time.time())
-    while _READ_REQUESTS[0] < time.time() - 100:
+    while _READ_REQUESTS[0] < time.time() - 101: # 101 seconds rather than 100 in case of general inaccuracy
         _READ_REQUESTS.popleft() # Get rid of all entries older than 100 seconds
 
     if IGNORE_QUOTA:
         return # Don't throttle.
 
-    while len(_READ_REQUESTS) > READ_QUOTA: # pragma: no cover
+    while len(_READ_REQUESTS) > (READ_QUOTA - 1): # pragma: no cover Note that the actual quota is one less than READ_QUOTA
         time.sleep(1)
-        while _READ_REQUESTS[0] < time.time() - 100:
+        while _READ_REQUESTS[0] < time.time() - 101:
             _READ_REQUESTS.popleft() # Get rid of all entries older than 100 seconds
 
 
@@ -117,7 +119,27 @@ class Spreadsheet():
         """
         if not IS_INITIALIZED: init() # Initialize this module if not done so already.
 
-        self._spreadsheetId = getIdFromUrl(spreadsheetId)
+        try:
+            try:
+                spreadsheetId = getIdFromUrl(spreadsheetId)
+            except ValueError:
+                pass # No problem if it's not a valid ID or URL; it could be a title.
+
+            SHEETS_SERVICE.spreadsheets().get(spreadsheetId=spreadsheetId).execute(); _logReadRequests()
+        except HttpError:
+            # URL/ID wasn't found, so check if this is the title of a spreadsheet returned by listSpreadsheets()
+            sheetIDsWithTitle = []
+            for listedId, listedTitle in listSpreadsheets().items():
+                if listedTitle == spreadsheetId:
+                    sheetIDsWithTitle.append(listedId)
+            if len(sheetIDsWithTitle) == 1:
+                spreadsheetId = sheetIDsWithTitle[0]
+            elif len(sheetIDsWithTitle) == 0:
+                raise EZSheetsException('No spreadsheet with id, url, or title of %r found for the Google account in this token file.' % (spreadsheetId))
+            elif len(sheetIDsWithTitle) > 1:
+                raise EZSheetsException('Multiple spreadsheets with title of %r found. Specify the id or url instead.' % (spreadsheetId))
+
+        self._spreadsheetId = spreadsheetId
         self.sheets = ()
         self.refresh()
 
@@ -126,8 +148,7 @@ class Spreadsheet():
         Updates this Spreadsheet object's Sheet objects with the current data
         of the spreadsheet and sheets on Google sheets.
         """
-        request = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId)
-        response = request.execute(); _logReadRequests()
+        response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId).execute(); _logReadRequests()
 
         self._title = response['properties']['title']
 
@@ -344,6 +365,9 @@ class Spreadsheet():
             DRIVE_SERVICE.files().update(fileId=self._spreadsheetId,
                                          body={'trashed': True}).execute()
 
+
+    def open(self):
+        webbrowser.open(self.url)
 
 
 def _makeFilenameSafe(filename):
@@ -1096,11 +1120,20 @@ class Sheet():
         self._cells = {}
 
 
-    def copyTo(self, destinationSpreadsheetId):
+    def copyTo(self, destinationSpreadsheet):
+
+        # NOTE: Don't update this method to allow ID or URL strings to be
+        # passed, because we'll always need to call refresh() on the
+        # spreadsheet object itself.
+
+        if not isinstance(destinationSpreadsheet, Spreadsheet):
+            raise TypeError('destinationSpreadsheet must be of type Spreadsheet, not %s' % (type(destinationSpreadsheet).__name__))
+
         request = SHEETS_SERVICE.spreadsheets().sheets().copyTo(spreadsheetId=self._spreadsheet._spreadsheetId,
                                                          sheetId=self._sheetId,
-                                                         body={'destinationSpreadsheetId': destinationSpreadsheetId})
+                                                         body={'destinationSpreadsheetId': destinationSpreadsheet._spreadsheetId})
         request.execute(); _logWriteRequest()
+        destinationSpreadsheet.refresh() # Refresh the spreadsheet since its sheets list has changed.
 
 
     def delete(self):
@@ -1186,11 +1219,14 @@ class Sheet():
         key = args[:-1]
         value = args[-1]
 
-        if isinstance(key, str):
+        if isinstance(key[0], str):
             # Key is assumed to be an address like 'A1'
-            return self.update(key, value)
-        else:
+            return self.update(key[0], value)
+        elif len(key[0]) == 2:
             # Key is assumed to be a tuple of column, row addresses
+            return self.update(*key[0], value)
+        else:
+            # Let update() handle raising an error.
             return self.update(*key, value)
 
 
@@ -1269,6 +1305,8 @@ def getIdFromUrl(url):
     # https://docs.google.com/spreadsheets/d/16RWH9XBBwd8pRYZDSo9EontzdVPqxdGnwM5MnP6T48c/edit#gid=0
     if url.startswith('https://docs.google.com/spreadsheets/d/'):
         spreadsheetId = url[39:url.find('/', 39)]
+
+        # TODO URL could also have been in the form: https://docs.google.com/spreadsheets/u/3/d/1_MNPzTbsGQsMWVG9Di91U03sjbs_1SUUKPZVcnzlPbA/edit
     else:
         spreadsheetId = url
 
