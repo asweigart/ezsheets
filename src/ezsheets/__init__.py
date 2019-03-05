@@ -45,8 +45,10 @@ _WRITE_REQUESTS = collections.deque()
 READ_QUOTA = 90 # 50 reads per 100 seconds
 WRITE_QUOTA = 90 # 50 writes per 100 seconds
 IGNORE_QUOTA = False
+""" TODO - create a context manager to wrap calls, so that we can do both
+preventative throttling and automated retries if it somehow raises an exception.
+Also, use a sqlite database so that multiple scripts use the same queue.
 
-"""
 Features to add:
 - delete spreadsheets
 - download as csv/excel/whatever
@@ -125,7 +127,8 @@ class Spreadsheet():
             except ValueError:
                 pass # No problem if it's not a valid ID or URL; it could be a title.
 
-            SHEETS_SERVICE.spreadsheets().get(spreadsheetId=spreadsheetId).execute(); _logReadRequests()
+            request = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=spreadsheetId)
+            _logReadRequests(); request.execute()
         except HttpError:
             # URL/ID wasn't found, so check if this is the title of a spreadsheet returned by listSpreadsheets()
             sheetIDsWithTitle = []
@@ -148,7 +151,7 @@ class Spreadsheet():
         Updates this Spreadsheet object's Sheet objects with the current data
         of the spreadsheet and sheets on Google sheets.
         """
-        response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId).execute(); _logReadRequests()
+        _logReadRequests(); response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId).execute()
 
         self._title = response['properties']['title']
 
@@ -295,7 +298,7 @@ class Spreadsheet():
         body={
             'requests': [{'updateSpreadsheetProperties': {'properties': {'title': value},
                                                           'fields': 'title'}}]})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
         self._title = value
 
 
@@ -310,7 +313,7 @@ class Spreadsheet():
         request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
         body={
             'requests': [{'addSheet': {'properties': {'title': title, 'index': index}}}]})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         self.refresh()
         self.sheets[index].resize(columnCount, rowCount)
@@ -416,7 +419,7 @@ class Sheet():
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'title': value},
                                                     'fields': 'title'}}]})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
         self._title = value
 
 
@@ -436,7 +439,7 @@ class Sheet():
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'tabColor': tabColorArg},
                                                     'fields': 'tabColor'}}]})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
         self._tabColor = tabColorArg
 
 
@@ -472,7 +475,7 @@ class Sheet():
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'index': value},
                                                     'fields': 'index'}}]})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         self._spreadsheet.refresh() # Update the spreadsheet's tuple of Sheet objects to reflect the new order.
         #self._index = self._spreadsheet.sheets.index(self) # Update the local Sheet object's index.
@@ -780,7 +783,7 @@ class Sheet():
 
     def _refreshProperties(self):
         # Get all the sheet properties:
-        response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheet._spreadsheetId).execute(); _logReadRequests()
+        _logReadRequests(); response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheet._spreadsheetId).execute()
 
         for sheetDict in response['sheets']:
             if sheetDict['properties']['sheetId'] == self._sheetId: # Find this sheet in the returned spreadsheet json data.
@@ -809,9 +812,9 @@ class Sheet():
 
     def _refreshData(self):
         # Get all the sheet data:
-        response = SHEETS_SERVICE.spreadsheets().values().get(
+        _logReadRequests(); response = SHEETS_SERVICE.spreadsheets().values().get(
             spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount)).execute(); _logReadRequests()
+            range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount)).execute()
 
         sheetData = response.get('values', [[]])
         self._cells = {}
@@ -838,7 +841,7 @@ class Sheet():
             'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
                                                                    'gridProperties': gridProperties},
                                                     'fields': 'gridProperties'}}]})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
 
     def _enlargeIfNeeded(self, requestedColumn=None, requestedRow=None):
@@ -887,7 +890,7 @@ class Sheet():
                 #'range': '%s!%s:%s' % (self._title, cellLocation, cellLocation),
                 }
             )
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         if value == '':
             del self._cells[(column, row)]
@@ -921,7 +924,7 @@ class Sheet():
                 #'range': '%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
                 }
             )
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         # Update the local data in `_cells`:
         for colNumBase1 in range(1, self._columnCount+1):
@@ -958,7 +961,7 @@ class Sheet():
                 #'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
                 }
             )
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         # Update the local data in `_cells`:
         for rowNumBase1 in range(1, self._rowCount+1):
@@ -1007,7 +1010,7 @@ class Sheet():
                 #'range': rangeCells,
                 }
             )
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         # Update the local data in `_cells`:
         for rowNumBase1 in range(startRow, startRow + len(rows)):
@@ -1056,7 +1059,7 @@ class Sheet():
                 #'range': rangeCells,
                 }
             )
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         # Update the local data in `_cells`:
         for colNumBase1 in range(startColumn, startColumn + len(columns)):
@@ -1095,7 +1098,7 @@ class Sheet():
                 #'range': rangeCells,
                 }
             )
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         # Update the local data in `_cells`:
         for colNumBase0 in range(len(columns)):
@@ -1114,7 +1117,7 @@ class Sheet():
                 #'range': rangeCells,
                 }
             )
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
 
         # Update the local data in `_cells`:
         self._cells = {}
@@ -1132,7 +1135,7 @@ class Sheet():
         request = SHEETS_SERVICE.spreadsheets().sheets().copyTo(spreadsheetId=self._spreadsheet._spreadsheetId,
                                                          sheetId=self._sheetId,
                                                          body={'destinationSpreadsheetId': destinationSpreadsheet._spreadsheetId})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
         destinationSpreadsheet.refresh() # Refresh the spreadsheet since its sheets list has changed.
 
 
@@ -1143,7 +1146,7 @@ class Sheet():
         request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
             body={
                 'requests': [{'deleteSheet': {'sheetId': self._sheetId}}]})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
         self._spreadsheet.refresh() # Refresh the spreadsheet's list of sheets.
 
 
@@ -1196,7 +1199,7 @@ class Sheet():
                                                                    'gridProperties': {'rowCount': rowCount,
                                                                                       'columnCount': columnCount}},
                                                     'fields': 'gridProperties'}}]})
-        request.execute(); _logWriteRequest()
+        _logWriteRequest(); request.execute()
         self._rowCount = rowCount
         self._columnCount = columnCount
 
@@ -1296,7 +1299,7 @@ def createSpreadsheet(title=''):
     request = SHEETS_SERVICE.spreadsheets().create(body={
         'properties': {'title': title}
         })
-    response = request.execute(); _logWriteRequest()
+    _logWriteRequest(); response = request.execute()
 
     return Spreadsheet(response['spreadsheetId'])
 
