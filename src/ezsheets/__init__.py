@@ -8,6 +8,7 @@
 # TODO - batch mode?
 
 import pickle, re, collections, time, webbrowser
+#import json
 import os.path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -79,7 +80,7 @@ def _logWriteRequest():
         while _WRITE_REQUESTS[0] < time.time() - 101:
             _WRITE_REQUESTS.popleft() # Get rid of all entries older than 100 seconds.
 
-def _logReadRequests():
+def _logReadRequest():
     """
     Logs a read request to the `_READ_REQUESTS` deque. This function should be
     called whenever a Google Sheets read request is made. It will also throttle
@@ -99,6 +100,60 @@ def _logReadRequests():
         time.sleep(1)
         while _READ_REQUESTS[0] < time.time() - 101:
             _READ_REQUESTS.popleft() # Get rid of all entries older than 100 seconds
+
+
+def _makeRequest(requestType, **kwargs):
+    pauseLength = 10
+    while True:
+        # TODO - do some of these requests count as a read AND write?
+        if requestType == 'get':
+            request = SHEETS_SERVICE.spreadsheets().get(**kwargs)
+            _logReadRequest()
+        elif requestType == 'batchUpdate':
+            request = SHEETS_SERVICE.spreadsheets().batchUpdate(**kwargs)
+            _logWriteRequest()
+        elif requestType == 'values.get':
+            request = SHEETS_SERVICE.spreadsheets().values().get(**kwargs)
+            _logReadRequest()
+        elif requestType == 'values.update':
+            request = SHEETS_SERVICE.spreadsheets().values().update(**kwargs)
+            _logWriteRequest()
+        elif requestType == 'sheets.copyTo':
+            request = SHEETS_SERVICE.spreadsheets().sheets().copyTo(**kwargs)
+            _logWriteRequest()
+        elif requestType == 'create':
+            request = SHEETS_SERVICE.spreadsheets().create(**kwargs)
+            _logWriteRequest()
+        elif requestType == 'drive.export_media':
+            request = DRIVE_SERVICE.files().export_media(**kwargs)
+            _logReadRequest()
+        elif requestType == 'drive.delete':
+            request = DRIVE_SERVICE.files().delete(**kwargs)
+            _logWriteRequest()
+        elif requestType == 'drive.update':
+            request = DRIVE_SERVICE.files().update(**kwargs)
+            _logWriteRequest()
+        elif requestType == 'drive.list':
+            request = DRIVE_SERVICE.files().list(**kwargs)
+            _logReadRequest()
+        elif requestType == 'drive.create':
+            request = DRIVE_SERVICE.files().create(**kwargs)
+            _logWriteRequest()
+        else:
+            assert False, 'Invalid requestType: %r' % (requestType)
+
+        try:
+            return request.execute()
+        except HttpError as e:
+            #errorContent = json.loads(str(e.content, encoding='utf-8'))
+            #if 'rateLimitExceeded' not in errorContent:
+            #    raise # Some other, non-quota-related HttpError was raised, so we'll just re-raise it here.
+            import datetime
+            print('HIT QUOTA', datetime.datetime.now())
+            if pauseLength == 50:
+                raise # Throttling doesn't seem to work. Give up, and re-raise the error.
+            time.sleep(pauseLength)
+            pauseLength += 5
 
 
 class EZSheetsException(Exception):
@@ -127,8 +182,9 @@ class Spreadsheet():
             except ValueError:
                 pass # No problem if it's not a valid ID or URL; it could be a title.
 
-            request = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=spreadsheetId)
-            _logReadRequests(); request.execute()
+            #request = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=spreadsheetId)
+            #_logReadRequest(); request.execute()
+            _makeRequest('get', **{'spreadsheetId': spreadsheetId})
         except HttpError:
             # URL/ID wasn't found, so check if this is the title of a spreadsheet returned by listSpreadsheets()
             sheetIDsWithTitle = []
@@ -151,7 +207,8 @@ class Spreadsheet():
         Updates this Spreadsheet object's Sheet objects with the current data
         of the spreadsheet and sheets on Google sheets.
         """
-        _logReadRequests(); response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId).execute()
+        #_logReadRequest(); response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheetId).execute()
+        response = _makeRequest('get', **{'spreadsheetId': self._spreadsheetId})
 
         self._title = response['properties']['title']
 
@@ -294,11 +351,15 @@ class Spreadsheet():
     @title.setter
     def title(self, value):
         value = str(value)
-        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
-        body={
-            'requests': [{'updateSpreadsheetProperties': {'properties': {'title': value},
-                                                          'fields': 'title'}}]})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
+        #body={
+        #    'requests': [{'updateSpreadsheetProperties': {'properties': {'title': value},
+        #                                                  'fields': 'title'}}]})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('batchUpdate', **{'spreadsheetId': self._spreadsheetId,
+                                       'body': {'requests':
+                                                [{'updateSpreadsheetProperties': {'properties': {'title': value},
+                                                                                               'fields': 'title'}}]}})
         self._title = value
 
 
@@ -310,10 +371,12 @@ class Spreadsheet():
             # Set the index to make this new sheet be the last sheet:
             index = len(self.sheets)
 
-        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
-        body={
-            'requests': [{'addSheet': {'properties': {'title': title, 'index': index}}}]})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheetId,
+        #body={
+        #    'requests': [{'addSheet': {'properties': {'title': title, 'index': index}}}]})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('batchUpdate', **{'spreadsheetId': self._spreadsheetId,
+                                       'body': {'requests': [{'addSheet': {'properties': {'title': title, 'index': index}}}]}})
 
         self.refresh()
         self.sheets[index].resize(columnCount, rowCount)
@@ -362,11 +425,14 @@ class Spreadsheet():
     def delete(self, permanent=False):
         if permanent:
             # Delete spreadsheet without moving it to Trashed folder:
-            DRIVE_SERVICE.files().delete(fileId=self._spreadsheetId).execute()
+            #DRIVE_SERVICE.files().delete(fileId=self._spreadsheetId).execute()
+            _makeRequest('drive.delete', **{'fileId': self._spreadsheetId})
         else:
             # Delete spreadsheet by moving it to Trashed folder:
-            DRIVE_SERVICE.files().update(fileId=self._spreadsheetId,
-                                         body={'trashed': True}).execute()
+            #DRIVE_SERVICE.files().update(fileId=self._spreadsheetId,
+            #                             body={'trashed': True}).execute()
+            _makeRequest('drive.delete', **{'fileId': self._spreadsheetId,
+                                            'body': {'trashed': True}})
 
 
     def open(self):
@@ -414,12 +480,15 @@ class Sheet():
     @title.setter
     def title(self, value):
         value = str(value)
-        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
-        body={
-            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
-                                                                   'title': value},
-                                                    'fields': 'title'}}]})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
+        #body={
+        #    'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+        #                                                           'title': value},
+        #                                            'fields': 'title'}}]})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('batchUpdate', **{'spreadsheetId': self._spreadsheet.spreadsheetId,
+            'body': {'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId, 'title': value},
+                                                    'fields': 'title'}}]}})
         self._title = value
 
 
@@ -434,12 +503,15 @@ class Sheet():
     def tabColor(self, value):
         tabColorArg = _getTabColorArg(value)
 
-        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
-        body={
-            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
-                                                                   'tabColor': tabColorArg},
-                                                    'fields': 'tabColor'}}]})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet.spreadsheetId,
+        #body={
+        #    'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+        #                                                           'tabColor': tabColorArg},
+        #                                            'fields': 'tabColor'}}]})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('batchUpdate', **{'spreadsheetId': self._spreadsheet.spreadsheetId,
+            'body': {'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId, 'tabColor': tabColorArg},
+                                                             'fields': 'tabColor'}}]}})
         self._tabColor = tabColorArg
 
 
@@ -470,12 +542,15 @@ class Sheet():
         if value > self._index:
             value += 1 # Google Sheets uses "before the move" indexes, which is confusing and I don't want to do it here.
 
-        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
-        body={
-            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
-                                                                   'index': value},
-                                                    'fields': 'index'}}]})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        #body={
+        #    'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+        #                                                           'index': value},
+        #                                            'fields': 'index'}}]})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('batchUpdate', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+            'body': {'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId, 'index': value},
+                                                             'fields': 'index'}}]}})
 
         self._spreadsheet.refresh() # Update the spreadsheet's tuple of Sheet objects to reflect the new order.
         #self._index = self._spreadsheet.sheets.index(self) # Update the local Sheet object's index.
@@ -783,7 +858,8 @@ class Sheet():
 
     def _refreshProperties(self):
         # Get all the sheet properties:
-        _logReadRequests(); response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheet._spreadsheetId).execute()
+        #_logReadRequest(); response = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=self._spreadsheet._spreadsheetId).execute()
+        response = _makeRequest('get', **{'spreadsheetId': self._spreadsheet._spreadsheetId})
 
         for sheetDict in response['sheets']:
             if sheetDict['properties']['sheetId'] == self._sheetId: # Find this sheet in the returned spreadsheet json data.
@@ -812,9 +888,11 @@ class Sheet():
 
     def _refreshData(self):
         # Get all the sheet data:
-        _logReadRequests(); response = SHEETS_SERVICE.spreadsheets().values().get(
-            spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount)).execute()
+        #_logReadRequest(); response = SHEETS_SERVICE.spreadsheets().values().get(
+        #    spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount)).execute()
+        response = _makeRequest('values.get', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                                 'range': '%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount)})
 
         sheetData = response.get('values', [[]])
         self._cells = {}
@@ -836,12 +914,15 @@ class Sheet():
                           'hideGridlines':           self._hideGridlines,
                           'rowGroupControlAfter':    self._rowGroupControlAfter,
                           'columnGroupControlAfter': self._columnGroupControlAfter}
-        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
-            body={
-            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
-                                                                   'gridProperties': gridProperties},
-                                                    'fields': 'gridProperties'}}]})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    body={
+        #    'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+        #                                                           'gridProperties': gridProperties},
+        #                                            'fields': 'gridProperties'}}]})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('batchUpdate', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+            'body': {'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId, 'gridProperties': gridProperties},
+                                                             'fields': 'gridProperties'}}]}})
 
 
     def _enlargeIfNeeded(self, requestedColumn=None, requestedRow=None):
@@ -880,17 +961,21 @@ class Sheet():
         self._enlargeIfNeeded(column, row)
 
         cellLocation = getColumnLetterOf(column) + str(row)
-        request = SHEETS_SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!%s:%s' % (self._title, cellLocation, cellLocation),
-            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
-            body={
-                'majorDimension': 'ROWS',
-                'values': [[value]],
-                #'range': '%s!%s:%s' % (self._title, cellLocation, cellLocation),
-                }
-            )
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().values().update(
+        #    spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    range='%s!%s:%s' % (self._title, cellLocation, cellLocation),
+        #    valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+        #    body={
+        #        'majorDimension': 'ROWS',
+        #        'values': [[value]],
+        #        #'range': '%s!%s:%s' % (self._title, cellLocation, cellLocation),
+        #        }
+        #    )
+        #_logWriteRequest(); request.execute()
+        _makeRequest('values.update', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                         'range': '%s!%s:%s' % (self._title, cellLocation, cellLocation),
+                                         'valueInputOption': 'USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+                                         'body': {'majorDimension': 'ROWS', 'values': [[value]]}})
 
         if value == '':
             del self._cells[(column, row)]
@@ -914,17 +999,21 @@ class Sheet():
 
         self._enlargeIfNeeded(None, row)
 
-        request = SHEETS_SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
-            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
-            body={
-                'majorDimension': 'ROWS',
-                'values': [values],
-                #'range': '%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
-                }
-            )
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().values().update(
+        #    spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    range='%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
+        #    valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+        #    body={
+        #        'majorDimension': 'ROWS',
+        #        'values': [values],
+        #        #'range': '%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
+        #        }
+        #    )
+        #_logWriteRequest(); request.execute()
+        _makeRequest('values.update', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                         'range': '%s!A%s:%s%s' % (self._title, row, getColumnLetterOf(len(values)), row),
+                                         'valueInputOption': 'USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+                                         'body': {'majorDimension': 'ROWS', 'values': [values]}})
 
         # Update the local data in `_cells`:
         for colNumBase1 in range(1, self._columnCount+1):
@@ -951,17 +1040,21 @@ class Sheet():
 
         self._enlargeIfNeeded(column, None)
 
-        request = SHEETS_SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
-            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
-            body={
-                'majorDimension': 'COLUMNS',
-                'values': [values],
-                #'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
-                }
-            )
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().values().update(
+        #    spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
+        #    valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+        #    body={
+        #        'majorDimension': 'COLUMNS',
+        #        'values': [values],
+        #        #'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
+        #        }
+        #    )
+        #_logWriteRequest(); request.execute()
+        _makeRequest('values.update', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                         'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(column), getColumnLetterOf(column), len(values)),
+                                         'valueInputOption': 'USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+                                         'body': {'majorDimension': 'COLUMNS', 'values': [values]}})
 
         # Update the local data in `_cells`:
         for rowNumBase1 in range(1, self._rowCount+1):
@@ -1000,17 +1093,21 @@ class Sheet():
 
         # Send the API request that updates the Google sheet.
         #rangeCells = '%s!A%s:%s%s' % (self._title, startRow, getColumnLetterOf(maxColumnCount), stopRow - 1)
-        request = SHEETS_SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!A%s:%s%s' % (self._title, startRow, getColumnLetterOf(maxColumnCount), startRow + len(rows) - 1),
-            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
-            body={
-                'majorDimension': 'ROWS',
-                'values': rows,
-                #'range': rangeCells,
-                }
-            )
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().values().update(
+        #    spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    range='%s!A%s:%s%s' % (self._title, startRow, getColumnLetterOf(maxColumnCount), startRow + len(rows) - 1),
+        #    valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+        #    body={
+        #        'majorDimension': 'ROWS',
+        #        'values': rows,
+        #        #'range': rangeCells,
+        #        }
+        #    )
+        #_logWriteRequest(); request.execute()
+        _makeRequest('values.update', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                         'range': '%s!A%s:%s%s' % (self._title, startRow, getColumnLetterOf(maxColumnCount), startRow + len(rows) - 1),
+                                         'valueInputOption': 'USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+                                         'body': {'majorDimension': 'ROWS', 'values': rows}})
 
         # Update the local data in `_cells`:
         for rowNumBase1 in range(startRow, startRow + len(rows)):
@@ -1049,17 +1146,21 @@ class Sheet():
 
         # Send the API request that updates the Google sheet.
         #rangeCells = '%s!A%s:%s%s' % (self._title, startRow, getColumnLetterOf(maxColumnCount), stopRow - 1)
-        request = SHEETS_SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(startColumn), getColumnLetterOf(startColumn + len(columns) - 1), maxRowCount),
-            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
-            body={
-                'majorDimension': 'COLUMNS',
-                'values': columns,
-                #'range': rangeCells,
-                }
-            )
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().values().update(
+        #    spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    range='%s!%s1:%s%s' % (self._title, getColumnLetterOf(startColumn), getColumnLetterOf(startColumn + len(columns) - 1), maxRowCount),
+        #    valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+        #    body={
+        #        'majorDimension': 'COLUMNS',
+        #        'values': columns,
+        #        #'range': rangeCells,
+        #        }
+        #    )
+        #_logWriteRequest(); request.execute()
+        _makeRequest('values.update', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                         'range': '%s!%s1:%s%s' % (self._title, getColumnLetterOf(startColumn), getColumnLetterOf(startColumn + len(columns) - 1), maxRowCount),
+                                         'valueInputOption': 'USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+                                         'body': {'majorDimension': 'COLUMNS', 'values': columns}})
 
         # Update the local data in `_cells`:
         for colNumBase1 in range(startColumn, startColumn + len(columns)):
@@ -1107,17 +1208,21 @@ class Sheet():
     """
 
     def clear(self):
-        request = SHEETS_SERVICE.spreadsheets().values().update(
-            spreadsheetId=self._spreadsheet._spreadsheetId,
-            range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount),
-            valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
-            body={
-                'majorDimension': 'ROWS',
-                'values': [[''] * self._columnCount for i in range(self._rowCount)],
-                #'range': rangeCells,
-                }
-            )
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().values().update(
+        #    spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    range='%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount),
+        #    valueInputOption='USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+        #    body={
+        #        'majorDimension': 'ROWS',
+        #        'values': [[''] * self._columnCount for i in range(self._rowCount)],
+        #        #'range': rangeCells,
+        #        }
+        #    )
+        #_logWriteRequest(); request.execute()
+        _makeRequest('values.update', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                         'range': '%s!A1:%s%s' % (self._title, getColumnLetterOf(self._columnCount), self._rowCount),
+                                         'valueInputOption': 'USER_ENTERED', # Details at https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+                                         'body': {'majorDimension': 'ROWS', 'values': [[''] * self._columnCount for i in range(self._rowCount)]}})
 
         # Update the local data in `_cells`:
         self._cells = {}
@@ -1132,10 +1237,13 @@ class Sheet():
         if not isinstance(destinationSpreadsheet, Spreadsheet):
             raise TypeError('destinationSpreadsheet must be of type Spreadsheet, not %s' % (type(destinationSpreadsheet).__name__))
 
-        request = SHEETS_SERVICE.spreadsheets().sheets().copyTo(spreadsheetId=self._spreadsheet._spreadsheetId,
-                                                         sheetId=self._sheetId,
-                                                         body={'destinationSpreadsheetId': destinationSpreadsheet._spreadsheetId})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().sheets().copyTo(spreadsheetId=self._spreadsheet._spreadsheetId,
+        #                                                 sheetId=self._sheetId,
+        #                                                 body={'destinationSpreadsheetId': destinationSpreadsheet._spreadsheetId})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('sheets.copyTo', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                         'sheetId': self._sheetId,
+                                         'body': {'destinationSpreadsheetId': destinationSpreadsheet._spreadsheetId}})
         destinationSpreadsheet.refresh() # Refresh the spreadsheet since its sheets list has changed.
 
 
@@ -1143,10 +1251,13 @@ class Sheet():
         if len(self._spreadsheet.sheets) == 1:
             raise ValueError('Cannot delete all sheets; spreadsheets must have at least one sheet')
 
-        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
-            body={
-                'requests': [{'deleteSheet': {'sheetId': self._sheetId}}]})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        #    body={
+        #        'requests': [{'deleteSheet': {'sheetId': self._sheetId}}]})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('batchUpdate', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                       'body': {'requests': [{'deleteSheet': {'sheetId': self._sheetId}}]}})
+
         self._spreadsheet.refresh() # Refresh the spreadsheet's list of sheets.
 
 
@@ -1193,13 +1304,16 @@ class Sheet():
             raise TypeError('columnCount arg must be a positive nonzero int, not %r' % (columnCount))
 
 
-        request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
-        body={
-            'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
-                                                                   'gridProperties': {'rowCount': rowCount,
-                                                                                      'columnCount': columnCount}},
-                                                    'fields': 'gridProperties'}}]})
-        _logWriteRequest(); request.execute()
+        #request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
+        #body={
+        #    'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId,
+        #                                                           'gridProperties': {'rowCount': rowCount,
+        #                                                                              'columnCount': columnCount}},
+        #                                            'fields': 'gridProperties'}}]})
+        #_logWriteRequest(); request.execute()
+        _makeRequest('batchUpdate', **{'spreadsheetId': self._spreadsheet._spreadsheetId,
+                                       'body': {'requests': [{'updateSheetProperties': {'properties': {'sheetId': self._sheetId, 'gridProperties': {'rowCount': rowCount, 'columnCount': columnCount}},
+                                                                                        'fields': 'gridProperties'}}]}})
         self._rowCount = rowCount
         self._columnCount = columnCount
 
@@ -1296,10 +1410,11 @@ def convertToColumnRowInts(arg):
 
 def createSpreadsheet(title=''):
     if not IS_INITIALIZED: init() # Initialize this module if not done so already.
-    request = SHEETS_SERVICE.spreadsheets().create(body={
-        'properties': {'title': title}
-        })
-    _logWriteRequest(); response = request.execute()
+    #request = SHEETS_SERVICE.spreadsheets().create(body={
+    #    'properties': {'title': title}
+    #    })
+    #_logWriteRequest(); response = request.execute()
+    response = _makeRequest('create', **{'body': {'properties': {'title': title}}})
 
     return Spreadsheet(response['spreadsheetId'])
 
@@ -1442,11 +1557,14 @@ def listSpreadsheets():
     spreadsheets = {} # key is ID, value is title
     page_token = None
     while True:
-        response = DRIVE_SERVICE.files().list(q="mimeType='application/vnd.google-apps.spreadsheet'",
-                                              spaces='drive',
-                                              fields='nextPageToken, files(id, name)',
-                                              pageToken=page_token).execute()
-
+        #response = DRIVE_SERVICE.files().list(q="mimeType='application/vnd.google-apps.spreadsheet'",
+        #                                      spaces='drive',
+        #                                      fields='nextPageToken, files(id, name)',
+        #                                      pageToken=page_token).execute()
+        response = _makeRequest('drive.list', **{'q': "mimeType='application/vnd.google-apps.spreadsheet'",
+                                                 'spaces': 'drive',
+                                                 'fields': 'nextPageToken, files(id, name)',
+                                                 'pageToken': page_token})
         for file in response.get('files', []):
             spreadsheets[file.get('id')] = file.get('name')
         page_token = response.get('nextPageToken', None)
@@ -1476,9 +1594,12 @@ def upload(filename):
 
     media = MediaFileUpload(filename,
                             mimetype=mimeType)
-    file = DRIVE_SERVICE.files().create(body={'name': filename, 'mimeType': 'application/vnd.google-apps.spreadsheet'},
-                                        media_body=media,
-                                        fields='id').execute()
+    #file = DRIVE_SERVICE.files().create(body={'name': filename, 'mimeType': 'application/vnd.google-apps.spreadsheet'},
+    #                                    media_body=media,
+    #                                    fields='id').execute()
+    file = _makeRequest('drive.create', **{'body': {'name': filename, 'mimeType': 'application/vnd.google-apps.spreadsheet'},
+                                           'media_body': media,
+                                           'fields': 'id'})
     return Spreadsheet(file.get('id'))
 
 
