@@ -17,7 +17,7 @@ from google.auth.transport.requests import Request
 from apiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 
-__version__ = '0.0.2'
+__version__ = '0.0.3'
 
 #SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets']
@@ -1495,61 +1495,67 @@ def convertAddress(*address):
     raise TypeError('The address argument must be a singe string like "A1" or a tuple of two 1-based integers.')
 
 
-def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickle', driveTokenFile='token-drive.pickle'):
+def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickle', driveTokenFile='token-drive.pickle', _raiseException=True):
     global SHEETS_SERVICE, DRIVE_SERVICE, IS_INITIALIZED
 
     IS_INITIALIZED = False # Set this to False, in case module was initialized before but this current initialization fails.
 
-    if not os.path.exists(credentialsFile):
-        raise EZSheetsException('Can\'t find credentials file at %s. You can download this file from https://developers.google.com/sheets/api/quickstart/python  and clicking "Enable the Google Sheets API". Rename the downloaded file to credentials-sheets.json.' % (os.path.abspath(credentialsFile)))
+    try:
+        if not os.path.exists(credentialsFile):
+            raise EZSheetsException('Can\'t find credentials file at %s. You can download this file from https://developers.google.com/sheets/api/quickstart/python  and clicking "Enable the Google Sheets API". Rename the downloaded file to credentials-sheets.json.' % (os.path.abspath(credentialsFile)))
 
-    # Log in to Google Sheets API to generate token-sheets.pickle.
-    creds = None
-    # The file token-sheets.pickle stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    if os.path.exists(sheetsTokenFile):
-        with open(sheetsTokenFile, 'rb') as token:
-            creds = pickle.load(token)
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+        # Log in to Google Sheets API to generate token-sheets.pickle.
+        creds = None
+        # The file token-sheets.pickle stores the user's access and refresh tokens, and is
+        # created automatically when the authorization flow completes for the first
+        # time.
+        if os.path.exists(sheetsTokenFile):
+            with open(sheetsTokenFile, 'rb') as token:
+                creds = pickle.load(token)
+        # If there are no (valid) credentials available, let the user log in.
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    credentialsFile, SCOPES_SHEETS)
+                creds = flow.run_local_server()
+            # Save the credentials for the next run
+            with open(sheetsTokenFile, 'wb') as token:
+                pickle.dump(creds, token)
+
+        SHEETS_SERVICE = build('sheets', 'v4', credentials=creds)
+
+
+        # Log in to Google Drive API to generate token-drive.pickle.
+        creds = None
+        # The file token.pickle stores the user's access and refresh tokens, and is
+        # created automatically when the authorization flow completes for the first
+        # time.
+        if os.path.exists(driveTokenFile):
+            with open(driveTokenFile, 'rb') as token:
+                creds = pickle.load(token)
+        # If there are no (valid) credentials available, let the user log in.
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    credentialsFile, SCOPES_DRIVE)
+                creds = flow.run_local_server()
+            # Save the credentials for the next run
+            with open(driveTokenFile, 'wb') as token:
+                pickle.dump(creds, token)
+
+        DRIVE_SERVICE = build('drive', 'v3', credentials=creds)
+
+        IS_INITIALIZED = True
+        return IS_INITIALIZED
+    except:
+        if _raiseException:
+            raise
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                credentialsFile, SCOPES_SHEETS)
-            creds = flow.run_local_server()
-        # Save the credentials for the next run
-        with open(sheetsTokenFile, 'wb') as token:
-            pickle.dump(creds, token)
-
-    SHEETS_SERVICE = build('sheets', 'v4', credentials=creds)
-
-
-    # Log in to Google Drive API to generate token-drive.pickle.
-    creds = None
-    # The file token.pickle stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    if os.path.exists(driveTokenFile):
-        with open(driveTokenFile, 'rb') as token:
-            creds = pickle.load(token)
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                credentialsFile, SCOPES_DRIVE)
-            creds = flow.run_local_server()
-        # Save the credentials for the next run
-        with open(driveTokenFile, 'wb') as token:
-            pickle.dump(creds, token)
-
-    DRIVE_SERVICE = build('drive', 'v3', credentials=creds)
-
-    IS_INITIALIZED = True
-
+            return False
 
 def listSpreadsheets():
     if not IS_INITIALIZED: init()
@@ -1603,5 +1609,5 @@ def upload(filename):
     return Spreadsheet(file.get('id'))
 
 
-
+init(_raiseException=False)
 #s = Spreadsheet('https://docs.google.com/spreadsheets/d/1lRyPHuaLIgqYwkCTJYexbZUO1dcWeunm69B0L7L4ZQ8/edit#gid=0')
