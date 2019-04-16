@@ -8,7 +8,7 @@
 # TODO - batch mode?
 
 import pickle, re, collections, time, webbrowser
-#import json
+import json
 import os.path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -17,7 +17,7 @@ from google.auth.transport.requests import Request
 from apiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 
-__version__ = '0.0.3'
+__version__ = '0.0.4'
 
 #SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets']
@@ -145,11 +145,9 @@ def _makeRequest(requestType, **kwargs):
         try:
             return request.execute()
         except HttpError as e:
-            #errorContent = json.loads(str(e.content, encoding='utf-8'))
-            #if 'rateLimitExceeded' not in errorContent:
-            #    raise # Some other, non-quota-related HttpError was raised, so we'll just re-raise it here.
-            import datetime
-            print('HIT QUOTA', datetime.datetime.now())
+            errorContent = json.loads(str(e.content, encoding='utf-8'))
+            if errorContent['error']['errors'][0]['reason'] != 'rateLimitExceeded':
+                raise # Some other, non-quota-related HttpError was raised, so we'll just re-raise it here.
             if pauseLength == 50:
                 raise # Throttling doesn't seem to work. Give up, and re-raise the error.
             time.sleep(pauseLength)
@@ -431,7 +429,7 @@ class Spreadsheet():
             # Delete spreadsheet by moving it to Trashed folder:
             #DRIVE_SERVICE.files().update(fileId=self._spreadsheetId,
             #                             body={'trashed': True}).execute()
-            _makeRequest('drive.delete', **{'fileId': self._spreadsheetId,
+            _makeRequest('drive.update', **{'fileId': self._spreadsheetId,
                                             'body': {'trashed': True}})
 
 
