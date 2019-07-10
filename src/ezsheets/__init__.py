@@ -17,7 +17,7 @@ from google.auth.transport.requests import Request
 from apiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 
-__version__ = '0.0.4'
+__version__ = '0.0.6'
 
 #SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets']
@@ -1493,7 +1493,7 @@ def convertAddress(*address):
     raise TypeError('The address argument must be a singe string like "A1" or a tuple of two 1-based integers.')
 
 
-def init(credentialsFile='credentials.json', sheetsTokenFile='token-sheets.pickle', driveTokenFile='token-drive.pickle', _raiseException=True):
+def init(credentialsFile='credentials-sheets.json', sheetsTokenFile='token-sheets.pickle', driveTokenFile='token-drive.pickle', _raiseException=True):
     global SHEETS_SERVICE, DRIVE_SERVICE, IS_INITIALIZED
 
     IS_INITIALIZED = False # Set this to False, in case module was initialized before but this current initialization fails.

@@ -13,7 +13,7 @@ To install with pip, run:
 Quickstart Guide
 ----------------
 
-First, go to https://developers.google.com/sheets/api/quickstart/python and click the "Enable the Google Sheets API" button. You'll need to log into your Google account. (I recommend using a separate Google account specifically made for your Python scripts.) Then download the credentials.json file, and place it in the same folder as your Python script.
+First, go to https://developers.google.com/sheets/api/quickstart/python and click the "Enable the Google Sheets API" button. You'll need to log into your Google account. (I recommend using a separate Google account specifically made for your Python scripts.) Then download the credentials.json file, rename it to credentials-sheets.json, and place it in the same folder as your Python script.
 
 Next, install the follow modules using `pip` (or `pip3` for Python 3 on macOS and Linux):
 
@@ -23,7 +23,7 @@ Next install the EZSheets module:
 
     pip install --upgrade ezsheets
 
-The first time you call an EZSheets function, the module will use your credentials.json file to generatea token.pickle file. Treat these files the same as you would your Google account password.
+The first time you call an EZSheets function, the module will use your credentials-sheets.json file to generate a token-sheets.pickle and token-drive.pickle file. Don't share these files: Treat these files the same as you would your Google account password.
 
 Create a `Spreadsheet` object by using the Spreadsheet's URL:
 
