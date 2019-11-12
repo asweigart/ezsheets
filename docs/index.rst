@@ -72,8 +72,6 @@ like passwords.
 Quickstart
 ----------
 
-You need a Google account to access Google Sheets.
-
 .. code-block:: none
 
     >>> import ezsheets
