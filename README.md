@@ -1,7 +1,7 @@
 EZSheets
-======
+========
 
-A Pythonic interface to the Google Sheets API that actually works as of June 2019.
+A Pythonic interface to the Google Sheets API that actually works as of November 2019.
 
 Installation
 ------------
@@ -13,15 +13,20 @@ To install with pip, run:
 Quickstart Guide
 ----------------
 
-First, go to https://developers.google.com/sheets/api/quickstart/python and click the "Enable the Google Sheets API" button. You'll need to log into your Google account. (I recommend using a separate Google account specifically made for your Python scripts.) Then download the credentials.json file, rename it to credentials-sheets.json, and place it in the same folder as your Python script.
+First you need to enable the Google Sheets API for your Google account:
 
-Next, install the follow modules using `pip` (or `pip3` for Python 3 on macOS and Linux):
-
-    pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+* Go to https://developers.google.com/sheets/api/quickstart/python
+* Click the blue "Enable the Google Sheets API" button.
+* If you aren't already logged in, log in to your Google account on the login page that appears. (I recommend using a separate Google account specifically made for your Python scripts.)
+* On the window that appears, click the blue "Download Client Configuration" button to download the credentials.json file.
+* Rename this file to credentials-sheets.json.
+* Place this file in the same folder as your Python script.
 
 Next install the EZSheets module:
 
     pip install --upgrade ezsheets
+
+(Use `pip3` on macOS and Linux.)
 
 The first time you call an EZSheets function, the module will use your credentials-sheets.json file to generate a token-sheets.pickle and token-drive.pickle file. Don't share these files: Treat these files the same as you would your Google account password.
 
