@@ -74,7 +74,8 @@ Authentication and Credentials Setup
 
 You need a Google account to access Google Sheets.
 
-.. code-block::
+.. code-block:: none
+
     >>> import ezsheets
 
     >>> ss = ezsheets.createSpreadsheet(title='My New Spreadsheet')
