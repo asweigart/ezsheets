@@ -69,8 +69,8 @@ Don't share the credential or token files with anyone: treat them
 like passwords.
 
 
-Authentication and Credentials Setup
-------------------------------------
+Quickstart
+----------
 
 You need a Google account to access Google Sheets.
 
