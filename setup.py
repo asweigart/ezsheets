@@ -8,7 +8,9 @@ with open('src/ezsheets/__init__.py', 'r') as fo:
 
 # Read in the README.md for the long description.
 with open('README.md') as fo:
-    long_description = fo.read()
+    content = fo.read()
+    long_description = content
+    description = re.search('(A Pythonic interface to.*)', content).group(1)
 
 setup(
     name='EZSheets',
@@ -16,7 +18,7 @@ setup(
     url='https://github.com/asweigart/ezsheets',
     author='Al Sweigart',
     author_email='al@inventwithpython.com',
-    description=('''A Pythonic interface to the Google Sheets API that actually works as of July 2019.'''),
+    description=description,
     long_description=long_description,
     long_description_content_type="text/markdown",
     license='GPLv3+',
@@ -32,6 +34,7 @@ setup(
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7'
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
     ],
 )

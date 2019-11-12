@@ -155,9 +155,8 @@ def _makeRequest(requestType, **kwargs):
 
 
 class EZSheetsException(Exception):
-    """
-    This class exists for this module to raise for EZSheets-specific problems.
-    """
+    """The base class for all EZSheets-specific problems. If the ``ezsheets`` module raises something that isn't this
+    or a subclass of this exception, you can assume it is caused by a bug in EZSheets."""
     pass
 
 
