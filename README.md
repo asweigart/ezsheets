@@ -86,7 +86,7 @@ You can also get or update data in a specific cell, row, or column:
     >>> sh.getColumn(1)
     ['cell A', 'another value']
     >>> sh.updateAll([['CELL A', 'ANOTHER VALUE', 'CELL C'], ['ANOTHER VALUE']])
-    >>> sh.getAll()
+    >>> sh.getRows()
     [['CELL A', 'ANOTHER VALUE', 'CELL C'], ['ANOTHER VALUE']]
 
 If the data on the Google Sheet changes, you can refresh your local copy of the data:
