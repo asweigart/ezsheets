@@ -130,8 +130,8 @@ def _makeRequest(requestType, **kwargs):
         elif requestType == "create":
             request = SHEETS_SERVICE.spreadsheets().create(**kwargs)
             _logWriteRequest()
-        elif requestType == "drive.export_media":
-            request = DRIVE_SERVICE.files().export_media(**kwargs)
+        elif requestType == "drive.export":
+            request = DRIVE_SERVICE.files().export(**kwargs)
             _logReadRequest()
         elif requestType == "drive.delete":
             request = DRIVE_SERVICE.files().delete(**kwargs)
@@ -421,7 +421,7 @@ class Spreadsheet:
         if filename is None:
             filename = _makeFilenameSafe(self._title) + "." + _fileType
 
-        request = DRIVE_SERVICE.files().export_media(fileId=self._spreadsheetId, mimeType=fileTypes[_fileType])
+        request = DRIVE_SERVICE.files().export(fileId=self._spreadsheetId, mimeType=fileTypes[_fileType])
         fh = open(filename, "wb")
         downloader = MediaIoBaseDownload(fh, request)
         done = False
