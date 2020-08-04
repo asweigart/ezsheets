@@ -17,7 +17,7 @@ from google.auth.transport.requests import Request
 from apiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 
-__version__ = "0.0.6"
+__version__ = "2020.8.3"
 
 # SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ["https://www.googleapis.com/auth/spreadsheets"]
