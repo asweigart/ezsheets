@@ -152,7 +152,7 @@ def _makeRequest(requestType, **kwargs):
             return request.execute()
         except HttpError as e:
             errorContent = json.loads(str(e.content, encoding="utf-8"))
-            if errorContent["error"]["errors"][0]["reason"] != "rateLimitExceeded":
+            if errorContent['error']['status'] != 'RESOURCE_EXHAUSTED':
                 raise  # Some other, non-quota-related HttpError was raised, so we'll just re-raise it here.
             if pauseLength == 50:
                 raise  # Throttling doesn't seem to work. Give up, and re-raise the error.
