@@ -1,7 +1,7 @@
 EZSheets
 ========
 
-A Pythonic interface to the Google Sheets API that actually works as of August 2020.
+A Pythonic interface to the Google Sheets API that actually works as of October 2020.
 
 Installation
 ------------
