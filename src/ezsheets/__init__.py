@@ -12,6 +12,7 @@ import json
 import os.path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from pyasn1.type.univ import Null
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from apiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -1784,6 +1785,109 @@ def upload(filename):
         }
     )
     return Spreadsheet(file.get("id"))
+
+def getFolder(folderName=None, driveId=None, trashed=False):
+    ''' Returns a dictionary of drive folders keyed by id, that contains string folderName '''
+    if not folderName: 
+        return None
+    
+    if not IS_INITIALIZED:
+        init()
+
+    folders = {}
+    pageToken = None
+    while True:
+        response = _makeRequest(
+            "drive.list",
+            **{
+                "q": f"name contains '{folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = {trashed!r}",
+                "corpora": "drive",
+                "driveId": driveId,
+                "includeItemsFromAllDrives": True,
+                "supportsAllDrives": True,
+                "fields": "nextPageToken, files(id, name)",
+                "pageToken": pageToken,
+            }
+        )
+        for folder in response.get("files", []):
+            folders[folder.get("id")] = folder.get("name")
+        pageToken = response.get("nextPageToken", None)
+        if pageToken is None:
+            break
+        
+    return folders
+
+def createFolder(folderName=None, parentFolderId=None):
+    '''
+    Creates a new folder with specified name inside the parentFolderId, if provided
+    Returns the new folder id
+    '''
+    if not IS_INITIALIZED:
+        init()
+
+    file = _makeRequest(
+        "drive.create",
+        **{
+            "body": {
+                "name": folderName, 
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [parentFolderId],
+            },
+            "supportsAllDrives": True,
+            "fields": "id",
+        }
+    )
+    return file.get("id")
+    
+def uploadToFolder(filename, folderId=None):
+    if not IS_INITIALIZED:
+        init()
+    if filename.lower().endswith(".xlsx"):
+        mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif filename.lower().endswith(".ods"):
+        mimeType = "application/x-vnd.oasis.opendocument.spreadsheet"
+    elif filename.lower().endswith(".csv"):
+        mimeType = "text/csv"
+    elif filename.lower().endswith(".tsv"):
+        mimeType = "text/tab-separated-values"
+    else:
+        raise ValueError(
+            "File to upload must be a .xlsx (Excel), .ods (OpenOffice), .csv (Comma-separated), or .tsv (Tab-separated) file type."
+        )
+
+    if not os.path.exists(filename):
+        raise FileNotFoundError("Unable to find a file named %s" % (os.path.abspath(filename)))
+
+    media = MediaFileUpload(filename, mimetype=mimeType)
+    basename = os.path.basename(filename)
+    file = _makeRequest(
+        "drive.create",
+        **{
+            "body": {
+                "name": basename, 
+                "parents": [folderId],
+            },
+            "media_body": media,
+            "supportsAllDrives": True,
+            "fields": "id",
+        }
+    )
+    return file.get("id")
+
+def deleteFolder(fileId=None):
+    '''Deletes a file or folder by Id'''
+    if not IS_INITIALIZED:
+        init()
+
+    file = _makeRequest(
+        "drive.update",
+        **{
+            "fileId": fileId,
+            "supportsAllDrives": True,
+            "body": {"trashed": True},
+        }
+    )
+    return str(file)
 
 
 init(_raiseException=False)
