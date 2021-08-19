@@ -12,7 +12,6 @@ import json
 import os.path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from pyasn1.type.univ import Null
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from apiclient.http import MediaIoBaseDownload, MediaFileUpload
