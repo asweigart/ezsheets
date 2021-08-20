@@ -1785,7 +1785,7 @@ def upload(filename):
     )
     return Spreadsheet(file.get("id"))
 
-def getFolder(folderName=None, driveId=None, trashed=False):
+def getFolder(folderName=None, driveId=None, trashed=False, allDrives=False):
     ''' Returns a dictionary of drive folders keyed by id, that contains string folderName '''
     if not folderName: 
         return None
@@ -1802,8 +1802,8 @@ def getFolder(folderName=None, driveId=None, trashed=False):
                 "q": f"name contains '{folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = {trashed!r}",
                 "corpora": "drive",
                 "driveId": driveId,
-                "includeItemsFromAllDrives": True,
-                "supportsAllDrives": True,
+                "includeItemsFromAllDrives": allDrives,
+                "supportsAllDrives": allDrives,
                 "fields": "nextPageToken, files(id, name)",
                 "pageToken": pageToken,
             }
@@ -1816,7 +1816,7 @@ def getFolder(folderName=None, driveId=None, trashed=False):
         
     return folders
 
-def createFolder(folderName=None, parentFolderId=None):
+def createFolder(folderName=None, parentFolderId=None, allDrives=False):
     '''
     Creates a new folder with specified name inside the parentFolderId, if provided
     Returns the new folder id
@@ -1832,13 +1832,13 @@ def createFolder(folderName=None, parentFolderId=None):
                 "mimeType": "application/vnd.google-apps.folder",
                 "parents": [parentFolderId],
             },
-            "supportsAllDrives": True,
+            "supportsAllDrives": allDrives,
             "fields": "id",
         }
     )
     return file.get("id")
     
-def uploadToFolder(filename, folderId=None):
+def uploadToFolder(filename, folderId=None, allDrives=False):
     if not IS_INITIALIZED:
         init()
     if filename.lower().endswith(".xlsx"):
@@ -1867,13 +1867,13 @@ def uploadToFolder(filename, folderId=None):
                 "parents": [folderId],
             },
             "media_body": media,
-            "supportsAllDrives": True,
+            "supportsAllDrives": allDrives,
             "fields": "id",
         }
     )
     return file.get("id")
 
-def deleteFolder(fileId=None):
+def deleteFolder(fileId=None, allDrives=False):
     '''Deletes a file or folder by Id'''
     if not IS_INITIALIZED:
         init()
@@ -1882,12 +1882,12 @@ def deleteFolder(fileId=None):
         "drive.update",
         **{
             "fileId": fileId,
-            "supportsAllDrives": True,
+            "supportsAllDrives": allDrives,
             "body": {"trashed": True},
         }
     )
-    return str(file)
-
+    return file.get("id")
+    
 
 init(_raiseException=False)
 # s = Spreadsheet('https://docs.google.com/spreadsheets/d/1lRyPHuaLIgqYwkCTJYexbZUO1dcWeunm69B0L7L4ZQ8/edit#gid=0')
