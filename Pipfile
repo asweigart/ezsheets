@@ -1,0 +1,14 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+pytest = "*"
+
+[packages]
+ezsheets = {editable = true, path = "."}
+pytest = "*"
+
+[requires]
+python_version = "3.7"
