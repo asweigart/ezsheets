@@ -1,7 +1,7 @@
 # EZSheets
 
 
-A Pythonic interface to the Google Sheets API that actually works as of September 2022.
+A Pythonic interface to the Google Sheets API that actually works as of October 2022.
 
 ## Installation and Setup
 
@@ -9,7 +9,7 @@ To install with pip, run:
 
     pip install ezsheets
 
-You will need to download a credentials file and set up Google Cloud services using your Google account. If you have a Google/Gmail account, you can do this and it is free (unless you are making large use of the Google Sheets API by sending out thousands of emails every day.) There's several steps to this, detailed in the following sections. These instructions were last updated September 2022.
+For your Python script to use ezsheets to access and edit your Google Sheets spreadsheets, you need a credentials JSON file and a token JSON file. This requires a one-time set up on Google Cloud services using your Google account. If you have a Google/Gmail account, you can do this and it is free (unless you are making large use of the Google Sheets API by sending out thousands of emails every day.) There's several steps to this, detailed in the following sections. These instructions were last updated September 2022.
 
 ### Create a new Google Cloud Project
 
