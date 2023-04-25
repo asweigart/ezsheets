@@ -7,15 +7,19 @@
 # TODO - figure out drive quotas
 # TODO - batch mode?
 
-import pickle, re, collections, time, webbrowser
+import collections
 import json
 import os.path
+import pickle
+import re
+import time
+import webbrowser
+
+from apiclient.http import MediaFileUpload, MediaIoBaseDownload
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from apiclient.http import MediaIoBaseDownload, MediaFileUpload
-
 
 __version__ = "2023.3.14"
 
@@ -593,9 +597,9 @@ class Sheet:
 
         # Update the index:
         if value > self._index:
-            value += (
-                1
-            )  # Google Sheets uses "before the move" indexes, which is confusing and I don't want to do it here.
+            # Google Sheets uses "before the move" indexes, which is confusing and I don't want to do it here.
+            value += 1
+
 
         # request = SHEETS_SERVICE.spreadsheets().batchUpdate(spreadsheetId=self._spreadsheet._spreadsheetId,
         # body={
@@ -1366,7 +1370,6 @@ class Sheet:
         self._cells = {}
 
     def copyTo(self, destinationSpreadsheet):
-
         # NOTE: Don't update this method to allow ID or URL strings to be
         # passed, because we'll always need to call refresh() on the
         # spreadsheet object itself.
@@ -1625,7 +1628,7 @@ def getColumnNumberOf(columnLetter):
     number = 0
     place = 0
     for digit in reversed(digits):
-        number += digit * (26 ** place)
+        number += digit * (26**place)
         place += 1
 
     return number
@@ -1660,9 +1663,8 @@ def init(
 ):
     global SHEETS_SERVICE, DRIVE_SERVICE, IS_INITIALIZED
 
-    IS_INITIALIZED = (
-        False
-    )  # Set this to False, in case module was initialized before but this current initialization fails.
+    # Set this to False, in case module was initialized before but this current initialization fails.
+    IS_INITIALIZED = False
 
     try:
         if not os.path.exists(credentialsFile):
