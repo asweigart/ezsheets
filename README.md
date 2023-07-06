@@ -1,7 +1,7 @@
 # EZSheets
 
 
-A Pythonic interface to the Google Sheets API that actually works as of March 2023.
+A Pythonic interface to the Google Sheets API that actually works as of July 2023.
 
 ## Installation and Setup
 
@@ -61,7 +61,7 @@ The pop up that appears shows your , click "DOWNLOAD JSON" to download the crede
 
 Run the Python interactive shell from the same folder that the *credentials-sheets.json* file is in and run `import ezsheets`. Or, place a *.py* Python program in this folder and have it run `import ezsheets`. EZSheets will load and automatically check this folder for a *credentials-sheets.json* file and, if found, launches your web browser to the OAuth consent screen. Sign in with the Google account you want to access from your Python script. This must be the same email address that you gave for the "test user" when configuring the Google Cloud project's OAuth consent screen.
 
-You will get a warning message that reads "Google hasn’t verified this app," but that's fine because this is the app (or project) that you've just created yourself. Click the Continue link. You'll come to another page that says "Python Google API Script wants access to your Google Account" (or whatever name you gave in the OAuth consent screen setup.) Click Continue.
+You will get a warning message that reads "Google hasn't verified this app," but that's fine because this is the app (or project) that you've just created yourself. Click the Continue link. You'll come to another page that says "Python Google API Script wants access to your Google Account" (or whatever name you gave in the OAuth consent screen setup.) Click Continue.
 
 You'll come to a plain web page that says, "The authentication flow has completed." You can now close the browser window. In the same folder as your *credentials-sheets.json* file, you'll now see a *token.json* file. Do not share these files: they can be used to log in and access your Google Sheets spreadsheets.
 

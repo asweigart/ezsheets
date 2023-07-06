@@ -834,5 +834,3 @@ def test_getitem(init, checkPreAndPostCondition):
     pass # TODO LEFT OFF
 
 
-if __name__ == '__main__':
-    pytest.main()

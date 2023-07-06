@@ -21,7 +21,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-__version__ = "2023.3.14"
+__version__ = "2023.8.6"
 
 # SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -1656,7 +1656,7 @@ def convertAddress(*address):
 
 
 def init(
-    credentialsFile="credentials-sheets.json",
+    credentialsFile='.',
     sheetsTokenFile="token-sheets.pickle",
     driveTokenFile="token-drive.pickle",
     _raiseException=True,
@@ -1666,12 +1666,39 @@ def init(
     # Set this to False, in case module was initialized before but this current initialization fails.
     IS_INITIALIZED = False
 
+    # If the credentialsFile parameter is None, assume the credentials json file in the cwd.
+    # In version 2023.3.14 and before (and in Automate the Boring Stuff
+    # 2nd Edition), the credentials file had to be credentials-sheets.json.
+    # But this isn't the name it has when you download it from Google
+    # Cloud Console, so we'll just use the client_secret_*.json filename
+    # format it already has, and fall back on credentials-sheets.json.
+    # If credentialsFile is a folder name, use that folder to search for the credentials file.
+
+    # credentialsFile is a bit misleading of a name because it can be a file or a folder (that contains the credentials file)
+    if os.path.isdir(os.path.abspath(credentialsFile)):
+        possibleCredentialsFiles = []
+        for filename in os.listdir(os.path.abspath(credentialsFile)):
+            if (filename.startswith('client_secret_') and filename.endswith('.json')) or filename == 'credentials-sheets.json':
+                possibleCredentialsFiles.append(filename)
+        if len(possibleCredentialsFiles) == 0:
+            credentialsFile = 'credentials-sheets.json'  # Setting it to this nonexistant file will trigger the later EZSheetsException.
+        elif len(possibleCredentialsFiles) > 1:
+            raise EZSheetsException('You must specify a credentialsFile argument to init() because multiple possible credential files exist in ' + str(os.getcwd()) + ': ' + ', '.join(possibleCredentialsFiles))
+        elif len(possibleCredentialsFiles) == 1:
+            credentialsFile = os.path.join(os.path.abspath(credentialsFile), possibleCredentialsFiles[0])
+
     try:
         if not os.path.exists(credentialsFile):
             raise EZSheetsException(
                 'Can\'t find credentials file at %s. You can download this file from https://developers.google.com/sheets/api/quickstart/python  and clicking "Enable the Google Sheets API". Rename the downloaded file to credentials-sheets.json.'
                 % (os.path.abspath(credentialsFile))
             )
+
+        # Assume that the token files are in the same folder as the credentials file:
+        if not os.path.isabs(sheetsTokenFile):
+            sheetsTokenFile = os.path.join(os.path.dirname(os.path.abspath(credentialsFile)), sheetsTokenFile)
+        if not os.path.isabs(driveTokenFile):
+            driveTokenFile = os.path.join(os.path.dirname(os.path.abspath(credentialsFile)), driveTokenFile)
 
         # Log in to Google Sheets API to generate token-sheets.pickle.
         creds = None
@@ -1780,7 +1807,7 @@ def upload(filename):
     file = _makeRequest(
         "drive.create",
         **{
-            "body": {"name": filename, "mimeType": "application/vnd.google-apps.spreadsheet"},
+            "body": {"name": os.path.basename(filename), "mimeType": "application/vnd.google-apps.spreadsheet"},
             "media_body": media,
             "fields": "id",
         }
