@@ -43,10 +43,12 @@ def test_basic():
 
 
 def test_getIdFromUrl():
+    # Fake url and id
     assert ezsheets.getIdFromUrl("https://docs.google.com/spreadsheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0") == "10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng"
 
     with pytest.raises(ValueError):
-        ezsheets.getIdFromUrl(r"https://docs.google.com/spread sheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0")
+        # Fake url and id
+        ezsheets.getIdFromUrl(r"https://docs.google.com/spread           sheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0")
 
 
 def test_getColumnLetterOf():
@@ -148,6 +150,8 @@ def test_Spreadsheet_attr(init, checkPreAndPostCondition):
     assert TEST_SS.spreadsheetId != ''
     assert TEST_SS.sheetTitles == ('Sheet1',)
     assert len(TEST_SS) == 1
+
+    assert TEST_SS.spreadsheetId == TEST_SS.id
 
 
 def test_createSheet_deleteSheet(init, checkPreAndPostCondition):
@@ -832,5 +836,28 @@ def test_convertAddress():
 
 def test_getitem(init, checkPreAndPostCondition):
     pass # TODO LEFT OFF
+
+
+def test_restricted_and_link_viewable():
+    # Restricted spreadsheet:
+    ezsheets.Spreadsheet('https://docs.google.com/spreadsheets/d/16O3PLFhA8EUH7CdmSeNtxie03kitBfLoi_aOex93WIA/edit#gid=0')
+
+    # Viewable by anyone with the link:
+    ezsheets.Spreadsheet('https://docs.google.com/spreadsheets/d/1WCKpKAgUjVJv2RM23dc4LHj9mOonK8VsvSXi_U4eqLk/edit#gid=0')
+
+
+def test_eq():
+    ss1 = ezsheets.Spreadsheet('https://autbor.com/examplegs')
+    ss2 = ezsheets.Spreadsheet('https://docs.google.com/spreadsheets/d/1TzOJxhNKr15tzdZxTqtQ3EmDP6em_elnbtmZIcyu8vI/')
+    ss3 = ezsheets.Spreadsheet('1TzOJxhNKr15tzdZxTqtQ3EmDP6em_elnbtmZIcyu8vI')
+
+    other_ss = ezsheets.Spreadsheet('https://docs.google.com/spreadsheets/d/1WCKpKAgUjVJv2RM23dc4LHj9mOonK8VsvSXi_U4eqLk/edit#gid=0')
+
+    assert ss1 == ss2 == ss3
+    assert ss1 != other_ss
+
+    assert ss1[0].id == ss1[0].sheetId
+
+
 
 

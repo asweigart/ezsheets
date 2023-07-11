@@ -9,19 +9,27 @@ To install with pip, run:
 
     pip install ezsheets
 
-For your Python script to use ezsheets to access and edit your Google Sheets spreadsheets, you need a credentials JSON file and a token JSON file. This requires a one-time set up on Google Cloud services using your Google account. If you have a Google/Gmail account, you can do this and it is free (unless you are making large use of the Google Sheets API by sending out thousands of emails every day.) There's several steps to this, detailed in the following sections. These instructions were last updated September 2022.
+For your Python script to use EZSheets to access and edit your Google Sheets spreadsheets, you need a credentials JSON file and a token JSON file. If you have a Google/Gmail account, you can do this and it is free. I strongly recommend creating a new Google account instead of using your existing one, to prevent a bug in your Python script from affecting the spreadsheets in your personal Google account. There are five parts to creating credentials:
+
+1. Create a new Google Cloud project.
+2. Enable the Google Sheets API and Google Drive API for your project.
+3. Configure the OAuth Consent Screen for your project.
+4. Create credentials for your project.
+5. Log in with the credentials file.
+
+This may seem like a lot of work, but you only have to perform this setup once.
 
 ### Create a new Google Cloud Project
 
-First, you need to set up a Google Cloud project. In your browser, go to https://console.cloud.google.com and sign in to you Google account with your username and password. (Your app can connect to any Google account, but this Google account will be one that manages the Google API access for EZSheets.) You will be taken to a Getting Started page. At the top of the page, click on "Select a project". In the pop-up window that appears, click "New Project".
+First, you need to set up a Google Cloud project. In your browser, go to https://console.cloud.google.com and sign in to your Google account with your username and password. (Your app can connect to any Google account, but this Google account will manage the Google API access for EZSheets.) You will be taken to a Getting Started page. At the top of the page, click on "Select a project". In the pop-up window that appears, click "New Project".
 
 ![Navigate to new project](google-cloud-new-project.png)
 
-This takes to a new project page. A Project Name like "My Project 23135" will be generated for you. There is also a Project ID like "macro-nuance-362516" randomly generated for you. These names won't be visible to users of your Python scripts and you can use whatever name you want. You can change the Project Name later but not the Project ID. I just use the default names that are generated for me. The Location can be left as "No organization". Note that at the free tier, you can only create 12 projects (as of September 2022) but you only need one for all the Python scripts that you want to create. Click the blue "CREATE" button to create the project.
+This takes you to a new project page. A Project Name like "My Project 23135" will be generated for you. There is also a Project ID like "macro-nuance-362516" randomly generated for you. These names won't be visible to users of your Python scripts and you can use whatever name you want. You can change the Project Name later but not the Project ID. I just use the default names that the website generates for me. You can leave the Location as "No organization". Free Google accounts can have up to 12 projects but you only need one project for all the Python scripts that you want to create. Click the blue "CREATE" button to create the project.
 
 ![Create a new project](create-new-project.png)
 
-Free Google accounts can have up to 10 projects.
+
 
 Click on "Select a project" at the top of the page again, and select the project you just created. You will be taken to the dashboard page for this Google Cloud Project. Next, you need to enable the Google Sheets API and Google Drive API for your project.
 
@@ -39,11 +47,11 @@ Next, you need to configure your project's OAuth Consent Screen.
 
 Click on the Navigation button in the upper left and then navigate to "APIs & Services" and then "OAuth Consent Screen." The consent screen will appear the first time when you or users of your Python script use EZSheets. With a free Google account that is not set up as a Google Workspace user, you'll have to select the External User Type option instead of Internal User Type. These are further explained on Google's [Setting up your OAuth consent screen help page](https://support.google.com/cloud/answer/10311615).
 
-On Step 1 "OAuth consent screen", select External and click the blue "CREATE" button. You'll be taken to a page where you set up what the OAuth consent screen looks like. This screen appears to the user when they first import the ezsheets module. Pick a name for App Name (I use something generic like Python Google API Script) and enter your email address for the User Support Email and Developer Contact Information. Then click "SAVE AND CONTINUE."
+On Step 1 "OAuth consent screen", select External and click the blue "CREATE" button. The next page shows what the OAuth consent screen looks like. This screen appears to the user when they first import the ezsheets module. Pick a name for App Name (I use something generic like Python Google API Script) and enter your email address for the User Support Email and Developer Contact Information. Then click the "SAVE AND CONTINUE" button.
 
-Step 2 "Scopes" involves adding your projects' scopes, which is a term Google chose for "permissions." Click the "ADD OR REMOVE SCOPES" button, and in the new panel that appears, go through the table and check the checkboxes for the scopes `.../auth/drive` (Google Drive API) and `.../auth/spreadsheets` (Google Sheets API) and click the blue "UPDATE" button. Then click "SAVE AND CONTINUE."
+On Step 2 "Scopes", your projects' scopes are the permissions for what the project is allowed to access. Click the "ADD OR REMOVE SCOPES" button, and in the new panel that appears, go through the table and check the checkboxes for the scopes `.../auth/drive` (Google Drive API) and `.../auth/spreadsheets` (Google Sheets API) and click the blue "UPDATE" button. Then click "SAVE AND CONTINUE."
 
-Step 3 "Test users" requires you to add the Gmail email addresses of the Google accounts that own the spreadsheets your Python script will interact with. Without going through Google's app approval process, your scripts will be limited to interacting with the email addresses you provide in this step. Click the "+ ADD USERS" button and in the new panel that appears, enter the Gmail addresses and click the blue "ADD" button. Then click "SAVE AND CONTINUE."
+Step 3 "Test users" requires you to add the Gmail email addresses of the Google accounts that own the spreadsheets your Python script will interact with. Without going through Google's app approval process, your scripts are limited to interacting with the email addresses you provide in this step. Click the "+ ADD USERS" button and in the new panel that appears, enter the Gmail address of your Google account and click the blue "ADD" button. Then click "SAVE AND CONTINUE."
 
 Step 4 "Summary" provides a summary of the previous steps. If all the information looks right, click the "BACK TO DASHBOARD" button. The next step is to create credentials for your project.
 
@@ -55,15 +63,15 @@ From the Navigation sidebar menu, click on "APIs & Services" and then "Credentia
 
 On the new page that appears, select "Desktop app" for the "Application type" and leave "Name" as the default "Desktop client 1." (You can change this to a different name if you want, it doesn't appear to the users of your Python script.) Click the blue "CREATE" button.
 
-The pop up that appears shows your , click "DOWNLOAD JSON" to download the credentials file. This file will have a name like *client_secret_282792235794-p2o9gfcub4htibfg2u207gcomco9nqm7.apps.googleusercontent.com.json*. Rename it to *credentials-sheets.json* and place it in the same folder that your Python script will be in.
+On the pop up that appears, click "DOWNLOAD JSON" to download the credentials file. This credentials JSON file will have a name like *client_secret_282792235794-p2o9gfcub4htibfg2u207gcomco9nqm7.apps.googleusercontent.com.json*. Place it in the same folder that your Python script will be in.
 
 ### Log In with the Credentials File
 
-Run the Python interactive shell from the same folder that the *credentials-sheets.json* file is in and run `import ezsheets`. Or, place a *.py* Python program in this folder and have it run `import ezsheets`. EZSheets will load and automatically check this folder for a *credentials-sheets.json* file and, if found, launches your web browser to the OAuth consent screen. Sign in with the Google account you want to access from your Python script. This must be the same email address that you gave for the "test user" when configuring the Google Cloud project's OAuth consent screen.
+Run the Python interactive shell from the same folder that the credentials JSON file is in and run `import ezsheets`. Or, place a *.py* Python program in this folder and have it run `import ezsheets`. EZSheets will load and automatically check this folder for a credentials JSON file and, if found, launches your web browser to the OAuth consent screen. Sign in with the Google account you want to access from your Python script. This must be the same email address that you gave for the "test user" when configuring the Google Cloud project's OAuth consent screen.
 
 You will get a warning message that reads "Google hasn't verified this app," but that's fine because this is the app (or project) that you've just created yourself. Click the Continue link. You'll come to another page that says "Python Google API Script wants access to your Google Account" (or whatever name you gave in the OAuth consent screen setup.) Click Continue.
 
-You'll come to a plain web page that says, "The authentication flow has completed." You can now close the browser window. In the same folder as your *credentials-sheets.json* file, you'll now see a *token.json* file. Do not share these files: they can be used to log in and access your Google Sheets spreadsheets.
+You'll come to a plain web page that says, "The authentication flow has completed." You can now close the browser window. In the same folder as your credentials JSON file, you'll now see a *token-drive.pickle* and *token-sheets.pickle* file. Treat these files like passwords and do not share them: they can be used to log in and access your Google Sheets spreadsheets.
 
 ## Quickstart Guide
 

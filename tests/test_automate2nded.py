@@ -276,6 +276,8 @@ def test_page337_read_write():
     sheet['C2'] = 'RoboCop'
     assert sheet['C2'] == 'RoboCop'
 
+    ss.delete(permanent=True)
+
 
 def test_page338():
     """
@@ -487,3 +489,9 @@ def test_page343():
 
     ss1.delete(permanent=True)  # (teardown)
     ss2.delete(permanent=True)  # (teardown)
+
+
+def test_bean_count():
+    # Just test to make sure this is still there. This URL is referenced by the "Finding Mistakes in a Spreadsheet" practice project section.
+    import ezsheets
+    ezsheets.Spreadsheet('https://docs.google.com/spreadsheets/d/1jDZEdvSIh4TmZxccyy0ZXrH-ELlrwq8_YYiZrEOB4jg/edit?usp=sharing/')

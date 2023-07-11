@@ -14,6 +14,8 @@ import pickle
 import re
 import time
 import webbrowser
+import http.client
+from urllib.parse import urlparse
 
 from apiclient.http import MediaFileUpload, MediaIoBaseDownload
 from google.auth.transport.requests import Request
@@ -21,7 +23,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-__version__ = "2023.8.6"
+from ezsheets.colorvalues import COLORS
+
+__version__ = "2023.8.11"
 
 # SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -41,8 +45,6 @@ DEFAULT_FROZEN_COLUMN_COUNT = 0
 DEFAULT_HIDE_GRID_LINES = False
 DEFAULT_ROW_GROUP_CONTROL_AFTER = False
 DEFAULT_COLUMN_GROUP_CONTROL_AFTER = False
-
-from ezsheets.colorvalues import COLORS
 
 # Quota throttling:
 _READ_REQUESTS = collections.deque()
@@ -187,6 +189,27 @@ class Spreadsheet:
             init()  # Initialize this module if not done so already.
 
         try:
+            # Figure out if this URL redirects to the Google Sheets URL.
+            # NOTE: Restricted spreadsheets will redirect a docs.google.com url to their https://accounts.google.com/v3/signin/... URL, which
+            # we don't want, so if it begins with docs.google.com just use it and don't check for redirects. (This doesn't apply to shared spreadsheets.)
+            while spreadsheetId.lower().startswith('http') and not spreadsheetId.lower().startswith('https://docs.google.com'):
+
+                redirects = [spreadsheetId]
+                while True:
+                    parsed_url = urlparse(spreadsheetId)
+                    http_conn = http.client.HTTPConnection(parsed_url.netloc)
+                    http_conn.request("GET", parsed_url.path)
+                    response = http_conn.getresponse()
+                    redirects.append(spreadsheetId)
+
+                    spreadsheetId = response.getheader('Location')
+                    if spreadsheetId == redirects[-1] or response.status not in (301, 302):
+                        """There's some weird behavior where the google doc url keeps redirecting to itself forever,
+                        hence why I added the spreadsheetId == redirects[-1] check. I'm not sure what causes this.
+                        Requests doesn't have this problem, nor does `wget https://bit.ly/3D34nDh 2>&1 | grep Location:`
+                        so I can't quite fix it. But this works well enough for now."""
+                        break
+
             try:
                 spreadsheetId = getIdFromUrl(spreadsheetId)
             except ValueError:
@@ -332,9 +355,18 @@ class Spreadsheet:
     @property
     def spreadsheetId(self):
         """
-        The unique id for this Spreadsheet on Google Sheets.
+        The unique, read-only id for this Spreadsheet on Google Sheets. (This is the old, deprecated name. Use id instead.)
         """
         return self._spreadsheetId
+
+
+    @property
+    def id(self):
+        """
+        The unique, read-only id for this Spreadsheet on Google Sheets.
+        """
+        return self._spreadsheetId
+
 
     @property
     def url(self):
@@ -361,6 +393,7 @@ class Spreadsheet:
         A string representation of code that can recreate this Spreadsheet object.
         """
         return "%s(spreadsheetId=%r)" % (type(self).__name__, self.spreadsheetId)
+        # NOTE that the __str__ function will still use "spreadsheetId" instead of "id" to maintain backwards compatibility.
 
     @property
     def title(self):
@@ -465,6 +498,15 @@ class Spreadsheet:
 
     def open(self):
         webbrowser.open(self.url)
+
+
+    def __eq__(self, other):
+        """
+        A Spreadsheet object is only considered equal to Spreadsheet objects with the same ID.
+        """
+        if not isinstance(other, Spreadsheet):
+            return False
+        return self.spreadsheetId == other.spreadsheetId
 
 
 def _makeFilenameSafe(filename):
@@ -638,9 +680,18 @@ class Sheet:
     @property
     def sheetId(self):
         """
-        The unique ID string of this Sheet object in its Spreadsheet.
+        The unique, read-only ID string of this Sheet object in its Spreadsheet. (This is the old, deprecated name. Use id instead.)
         """
         return self._sheetId
+
+    @property
+    def id(self):
+        """
+        The unique, read-only ID string of this Sheet object in its Spreadsheet. (This is the old, deprecated name. Use id instead.)
+        """
+        # NOTE that the __str__ function will still use "sheetId" instead of "id" to maintain backwards compatibility.
+        return self._sheetId
+
 
     @property
     def rowCount(self):
@@ -796,6 +847,7 @@ class Sheet:
             self._rowCount,
             self._columnCount,
         )
+        # NOTE that the __str__ function will still use "sheetId" instead of "id" to maintain backwards compatibility.
 
     def __repr__(self):
         """
@@ -808,6 +860,7 @@ class Sheet:
             self._rowCount,
             self._columnCount,
         )
+        # NOTE that the __str__ function will still use "sheetId" instead of "id" to maintain backwards compatibility.
 
     def get(self, *args):
         """
@@ -1676,6 +1729,7 @@ def init(
 
     # credentialsFile is a bit misleading of a name because it can be a file or a folder (that contains the credentials file)
     if os.path.isdir(os.path.abspath(credentialsFile)):
+        # If credentialsFile is a folder, search that folder for credentials-sheets.json or client_secret_*.json files:
         possibleCredentialsFiles = []
         for filename in os.listdir(os.path.abspath(credentialsFile)):
             if (filename.startswith('client_secret_') and filename.endswith('.json')) or filename == 'credentials-sheets.json':
@@ -1694,7 +1748,7 @@ def init(
                 % (os.path.abspath(credentialsFile))
             )
 
-        # Assume that the token files are in the same folder as the credentials file:
+        # Find the token files, assume they are in the same folder as the credentials file:
         if not os.path.isabs(sheetsTokenFile):
             sheetsTokenFile = os.path.join(os.path.dirname(os.path.abspath(credentialsFile)), sheetsTokenFile)
         if not os.path.isabs(driveTokenFile):
