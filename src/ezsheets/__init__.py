@@ -1868,6 +1868,109 @@ def upload(filename):
     )
     return Spreadsheet(file.get("id"))
 
+def getFolder(folderName=None, driveId=None, trashed=False, allDrives=False):
+    ''' Returns a dictionary of drive folders keyed by id, that contains string folderName '''
+    if not folderName: 
+        return None
+    
+    if not IS_INITIALIZED:
+        init()
+
+    folders = {}
+    pageToken = None
+    while True:
+        response = _makeRequest(
+            "drive.list",
+            **{
+                "q": f"name contains '{folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = {trashed!r}",
+                "corpora": "drive",
+                "driveId": driveId,
+                "includeItemsFromAllDrives": allDrives,
+                "supportsAllDrives": allDrives,
+                "fields": "nextPageToken, files(id, name)",
+                "pageToken": pageToken,
+            }
+        )
+        for folder in response.get("files", []):
+            folders[folder.get("id")] = folder.get("name")
+        pageToken = response.get("nextPageToken", None)
+        if pageToken is None:
+            break
+        
+    return folders
+
+def createFolder(folderName=None, parentFolderId=None, allDrives=False):
+    '''
+    Creates a new folder with specified name inside the parentFolderId, if provided
+    Returns the new folder id
+    '''
+    if not IS_INITIALIZED:
+        init()
+
+    file = _makeRequest(
+        "drive.create",
+        **{
+            "body": {
+                "name": folderName, 
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [parentFolderId],
+            },
+            "supportsAllDrives": allDrives,
+            "fields": "id",
+        }
+    )
+    return file.get("id")
+    
+def uploadToFolder(filename, folderId=None, allDrives=False):
+    if not IS_INITIALIZED:
+        init()
+    if filename.lower().endswith(".xlsx"):
+        mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif filename.lower().endswith(".ods"):
+        mimeType = "application/x-vnd.oasis.opendocument.spreadsheet"
+    elif filename.lower().endswith(".csv"):
+        mimeType = "text/csv"
+    elif filename.lower().endswith(".tsv"):
+        mimeType = "text/tab-separated-values"
+    else:
+        raise ValueError(
+            "File to upload must be a .xlsx (Excel), .ods (OpenOffice), .csv (Comma-separated), or .tsv (Tab-separated) file type."
+        )
+
+    if not os.path.exists(filename):
+        raise FileNotFoundError("Unable to find a file named %s" % (os.path.abspath(filename)))
+
+    media = MediaFileUpload(filename, mimetype=mimeType)
+    basename = os.path.basename(filename)
+    file = _makeRequest(
+        "drive.create",
+        **{
+            "body": {
+                "name": basename, 
+                "parents": [folderId],
+            },
+            "media_body": media,
+            "supportsAllDrives": allDrives,
+            "fields": "id",
+        }
+    )
+    return file.get("id")
+
+def deleteFolder(fileId=None, allDrives=False):
+    '''Deletes a file or folder by Id'''
+    if not IS_INITIALIZED:
+        init()
+
+    file = _makeRequest(
+        "drive.update",
+        **{
+            "fileId": fileId,
+            "supportsAllDrives": allDrives,
+            "body": {"trashed": True},
+        }
+    )
+    return file.get("id")
+    
 
 init(_raiseException=False)
 # s = Spreadsheet('https://docs.google.com/spreadsheets/d/1lRyPHuaLIgqYwkCTJYexbZUO1dcWeunm69B0L7L4ZQ8/edit#gid=0')
