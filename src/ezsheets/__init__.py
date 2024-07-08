@@ -25,7 +25,7 @@ from googleapiclient.errors import HttpError
 
 from ezsheets.colorvalues import COLORS
 
-__version__ = "2023.8.11"
+__version__ = "2024.8.8"
 
 # SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -179,7 +179,7 @@ class Spreadsheet:
     contain one or more sheets, also called worksheets.
     """
 
-    def __init__(self, spreadsheetId):
+    def __init__(self, spreadsheetId=None):
         """
         Initializer for Spreadsheet objects.
 
@@ -187,6 +187,14 @@ class Spreadsheet:
         """
         if not IS_INITIALIZED:
             init()  # Initialize this module if not done so already.
+
+        if spreadsheetId is None:
+            # Create a new spreadsheet.
+            ss = createSpreadsheet()
+            self._spreadsheetId = ss.id
+            self.sheets = ()
+            self.refresh()            
+            return
 
         try:
             # Figure out if this URL redirects to the Google Sheets URL.
@@ -507,6 +515,15 @@ class Spreadsheet:
         if not isinstance(other, Spreadsheet):
             return False
         return self.spreadsheetId == other.spreadsheetId
+
+    def Sheet(self, title="", index=None, columnCount=DEFAULT_NEW_COLUMN_COUNT, rowCount=DEFAULT_NEW_ROW_COUNT):
+        # Wrapper for createSheet(). Now that we can create Spreadsheet
+        # objects with by calling the Spreadsheet() class's init, we
+        # should have similar code for create sheets.
+        # The createSpreadsheet() and createSheet() functions remain,
+        # but they were always awkward from an API design point of view.
+        self.createSheet(title, index, columnCount, rowCount)
+
 
 
 def _makeFilenameSafe(filename):
@@ -1621,7 +1638,7 @@ def convertToColumnRowInts(arg):
     assert False  # pragma: no cover We know this will always return before this point because arg[-1].isdecimal().
 
 
-def createSpreadsheet(title=""):
+def createSpreadsheet(title="Untitled spreadsheet"):
     if not IS_INITIALIZED:
         init()  # Initialize this module if not done so already.
     # request = SHEETS_SERVICE.spreadsheets().create(body={
