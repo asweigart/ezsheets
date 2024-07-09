@@ -272,7 +272,7 @@ def test_page337_read_write():
     sheet['A2'] = 'Alice'
     assert sheet['A2'] == 'Alice'
     sheet['B2'] = 30
-    assert sheet['B2'] == 30
+    assert sheet['B2'] == '30'
     sheet['C2'] = 'RoboCop'
     assert sheet['C2'] == 'RoboCop'
 

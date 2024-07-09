@@ -25,7 +25,7 @@ from googleapiclient.errors import HttpError
 
 from ezsheets.colorvalues import COLORS
 
-__version__ = "2024.8.8"
+__version__ = "2024.8.9"
 
 # SCOPES_SHEETS = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SCOPES_SHEETS = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -1153,6 +1153,15 @@ class Sheet:
         if value == "":
             del self._cells[(column, row)]
         else:
+            # Google Sheets seem to only store strings (TODO: verify this), but we can't
+            # do a simple str() call here because True and False are stored as 'TRUE' and 'FALSE'
+            # I don't want to have to do a refresh on each setting, so for the _cells cache
+            # I'll just hard code some known rules and we can hunt down the edge cases later.
+            if isinstance(value, bool):
+                value = str(value).upper()
+            else:
+                value = str(value)
+
             self._cells[(column, row)] = value
 
     def updateRow(self, row, values):
