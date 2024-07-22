@@ -284,9 +284,10 @@ class Spreadsheet:
                 self.sheets[existingSheetIndex]._refreshData()
             else:
                 # If the sheet hasn't been seen before, create a new Sheet object:
-                replacementSheetsAttr.append(
-                    Sheet(self, sheetId)
-                )  # TODO - would be nice to reuse the info in `response` for this instead of letting the ctor make another request, but this isn't that important.
+                if (sheetInfo["properties"]["sheetType"] == "GRID"):
+                    replacementSheetsAttr.append(
+                        Sheet(self, sheetId)
+                    )  # TODO - would be nice to reuse the info in `response` for this instead of letting the ctor make another request, but this isn't that important.
 
         self.sheets = tuple(replacementSheetsAttr)  # Make sheets attribute an immutable tuple.
 
