@@ -22,6 +22,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     license='GPLv3+',
+    license_files=["LICENSE.txt"],
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
     test_suite='tests',
