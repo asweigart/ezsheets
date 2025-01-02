@@ -179,21 +179,21 @@ class Spreadsheet:
     contain one or more sheets, also called worksheets.
     """
 
-    def __init__(self, spreadsheetId=None):
+    def __init__(self, spreadsheetId=None, credentialsFile='.'):
         """
         Initializer for Spreadsheet objects.
 
         :param spreadsheetId: The ID or URL of the spreadsheet on Google Sheets. E.g. `'https://docs.google.com/spreadsheets/d/10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng/edit#gid=0'` or `'10tRbpHZYkfRecHyRHRjBLdQYoq5QWNBqZmH9tt4Tjng'`
         """
         if not IS_INITIALIZED:
-            init()  # Initialize this module if not done so already.
+            init(credentialsFile=credentialsFile)  # Initialize this module if not done so already.
 
         if spreadsheetId is None:
             # Create a new spreadsheet.
             ss = createSpreadsheet()
             self._spreadsheetId = ss.id
             self.sheets = ()
-            self.refresh()            
+            self.refresh()
             return
 
         try:
